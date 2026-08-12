@@ -26,24 +26,34 @@
     </nav>
   </aside>
   <main class="about">
-    <h2>What it does</h2>
-    <p>My ThreatLens helps a cybersecurity analyst monitor selected technologies for relevant vulnerabilities, exploits, and public threat intelligence.</p>
-    <h2>How to use it</h2>
+    <h2>What My ThreatLens does</h2>
+    <p>My ThreatLens helps a cybersecurity analyst monitor selected technologies for relevant vulnerabilities, exploits, and public threat intelligence. It collects matching public-source findings into one temporary review workspace.</p>
+    <h2>How to use the website</h2>
     <ol>
-      <li>Choose technologies, keywords, trusted sources, and a date range.</li>
-      <li>Save the named setup and run a scan.</li>
-      <li>Filter findings, open reviews, ask grounded questions, and export the current filtered set to Excel.</li>
+      <li><strong>Define your scope:</strong> on the Dashboard, choose the technologies you use, the security keywords you care about, trusted sources, and a publication date range.</li>
+      <li><strong>Save the setup:</strong> open the menu and select Save. Use Setups to create, load, duplicate, rename, search, or delete monitoring profiles.</li>
+      <li><strong>Run the scan:</strong> select Scan Now and wait for the progress indicator to finish. The scan checks only the scope saved in the active setup.</li>
+      <li><strong>Review the results:</strong> filter by severity, technology, source, CVE, or review state. Select a finding to read its evidence, record notes, complete the checklist, or ask a finding-specific question.</li>
+      <li><strong>Share the result:</strong> Export downloads the currently filtered findings as an Excel workbook. Email sends the filtered report only when the site owner has configured an SMTP mail account.</li>
     </ol>
+    <p><a class="button primary" href="/">Open the Dashboard</a></p>
+    <h2>Browser workspace and saved data</h2>
+    <p>Each browser has its own independent workspace. Changes on your laptop do not change your supervisor's setup in another browser or on another computer. Setup configuration is backed up in that browser so it can be restored after a temporary hosted-server restart. Clearing site data or using a private window starts a new workspace.</p>
+    <p>Findings, review notes, checklist state, and chat messages are temporary and are not saved in browser storage.</p>
+    <h2>Email delivery</h2>
+    <p>Email is optional and must be configured by the site owner with <code>SMTP_HOST</code>, <code>SMTP_FROM_EMAIL</code>, and any required SMTP username and app-specific password. Until then, use Export and attach the generated Excel report through an approved company channel.</p>
     <h2>Data privacy</h2>
-    <p>Setups, findings, notes, checklist state, and chat history are stored locally in SQLite. There are no accounts, analytics, or SMTP credentials.</p>
+    <p>The demonstration uses a shared login only to restrict access to the site. It has no personal user accounts or analytics. Passwords and SMTP secrets stay in server environment settings and are never stored in the browser workspace.</p>
     <h2>Sources</h2>
     <p>The application is designed for approved government, vendor, and cybersecurity news feeds. The included offline fixture collector keeps tests deterministic.</p>
     <h2>AI disclosure</h2>
-    <p>AI-assisted content may be incomplete or incorrect. Verify recommendations against the cited vendor advisory, CVE record, and your own environment before taking action. This app is still under testing and can be enhanced more.</p>
+    <p>AI-assisted summaries, relevance explanations, and chat responses may be incomplete, outdated, or incorrect. They are decision-support content, not a substitute for professional judgment. Verify every important claim against the linked primary source, vendor advisory, CVE record, and your organization's actual asset inventory before taking action.</p>
     <h2>Known limitations</h2>
     <p>Public sources can change, rate-limit, or become unavailable. This build uses deterministic fixtures by default; live collector validation requires network access.</p>
     <h2>Version and testing status</h2>
     <p>Version {{ version }}. Automated unit and API tests are included, with results documented in TEST_REPORT.md.</p>
+    <h2>Development</h2>
+    <p>Developed by <strong>Arsen Eliane</strong> during his internship at <strong>Alfa's Information Security Department</strong>.</p>
   </main>
 </body>
 </html>

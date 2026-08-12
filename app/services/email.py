@@ -23,8 +23,12 @@ def send_findings_email(settings,recipient,subject,body,findings,setup):
     recipient=recipient.strip(); subject=subject.strip()
     if not EMAIL_PATTERN.fullmatch(recipient): raise ValueError("Enter a valid recipient email address.")
     if not subject or "\r" in subject or "\n" in subject: raise ValueError("Enter a valid email subject.")
-    if not settings.smtp_host or not settings.smtp_from_email: raise RuntimeError("Email is not configured. Add SMTP_HOST and SMTP_FROM_EMAIL to the .env file, then restart My ThreatLens.")
-    if settings.smtp_username and not settings.smtp_password: raise RuntimeError("Email authentication is incomplete. Add the Gmail app password as SMTP_PASSWORD in the .env file, then restart My ThreatLens.")
+    if not settings.smtp_host or not settings.smtp_from_email:
+        location="the Render environment settings" if settings.require_demo_auth else "the .env file"
+        raise RuntimeError(f"Email is not configured. The site owner must add SMTP_HOST and SMTP_FROM_EMAIL to {location}, then restart My ThreatLens. You can use Export in the meantime.")
+    if settings.smtp_username and not settings.smtp_password:
+        location="the Render environment settings" if settings.require_demo_auth else "the .env file"
+        raise RuntimeError(f"Email authentication is incomplete. Add the mail provider's app-specific password as SMTP_PASSWORD in {location}, then restart My ThreatLens.")
     message=EmailMessage(); message["From"]=settings.smtp_from_email; message["To"]=recipient; message["Subject"]=subject
     message.set_content((body.strip()+"\n\n" if body.strip() else "")+f"This My ThreatLens report contains {len(findings)} findings. View it in an HTML-capable email client.")
     message.add_alternative(render_findings_html(findings,setup,body),subtype="html")
