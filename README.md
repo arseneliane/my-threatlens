@@ -54,7 +54,7 @@ Choose scope, save the setup, scan, filter findings, open a review, verify vendo
 
 ### DeepSeek assistants
 
-The dashboard and About page include a site-wide assistant. Each finding also has an independent, finding-specific conversation. For local Ollama, set `OLLAMA_URL=http://127.0.0.1:11434` and install the configured model. For a hosted site that must work from any laptop, set `OLLAMA_URL=https://ollama.com`, `OLLAMA_MODEL=deepseek-v4-flash:cloud`, and store `OLLAMA_API_KEY` only in the hosting provider's secret environment variables. The API key is never sent to the browser.
+The dashboard and About page include a site-wide assistant. Each finding also has an independent, finding-specific conversation. For local Ollama, set `OLLAMA_URL=http://127.0.0.1:11434` and install the configured model. For a hosted site that must work from any laptop, set `OLLAMA_URL=https://ollama.com`, `OLLAMA_MODEL=deepseek-v4-pro`, and store `OLLAMA_API_KEY` only in the hosting provider's secret environment variables. The API key is never sent to the browser.
 
 ## 9. AI Disclosure
 
