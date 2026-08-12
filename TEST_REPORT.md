@@ -3,7 +3,7 @@
 Verified on 2026-08-12 with Python 3.12:
 
 ```text
-37 passed, 3 warnings in 0.81s
+37 passed, 3 warnings in 0.88s
 ```
 
 The warnings are upstream deprecation notices for FastAPI's startup-event API and the TestClient/httpx compatibility layer; they do not represent test failures.

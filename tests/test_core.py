@@ -75,6 +75,8 @@ def test_html_email_contains_findings_without_excel_attachment():
     html=render_findings_html([finding],SimpleNamespace(name="Production"),"Security report")
     assert "Critical Windows flaw" in html and "CVE-2026-1234" in html and "Security report" in html
     assert "spreadsheet" not in html.lower()
+    assert "Security findings brief" in html and "Remote code execution is possible" not in html
+    assert "<table" not in html and "2026-" in html
 
 def test_zoho_https_email_delivery(monkeypatch):
     from datetime import datetime,timezone
