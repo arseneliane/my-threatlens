@@ -19,7 +19,7 @@ The application normalizes approved-source items, recognizes product and attack 
 - Non-blocking scans with progress and failure-safe behavior
 - Alias-aware technology-and-keyword matching
 - Server-side filters and pagination
-- DeepSeek through Ollama for both a site-wide workspace assistant and grounded per-finding conversations
+- A hosted open model through Ollama for both a site-wide workspace assistant and grounded per-finding conversations
 - Filter-consistent Excel export
 - Zoho Mail API or SMTP delivery with findings shown directly in the email
 
@@ -52,9 +52,9 @@ Open http://127.0.0.1:8001.
 
 Choose scope, save the setup, scan, filter findings, open a review, verify vendor evidence, record notes and checklist progress, and export the current filtered set.
 
-### DeepSeek assistants
+### Ollama assistants
 
-The dashboard and About page include a site-wide assistant. Each finding also has an independent, finding-specific conversation. For local Ollama, set `OLLAMA_URL=http://127.0.0.1:11434` and install the configured model. For a hosted site that must work from any laptop, set `OLLAMA_URL=https://ollama.com`, `OLLAMA_MODEL=deepseek-v4-pro`, and store `OLLAMA_API_KEY` only in the hosting provider's secret environment variables. The API key is never sent to the browser.
+The dashboard and About page include a site-wide assistant. Each finding also has an independent, finding-specific conversation. For local Ollama, set `OLLAMA_URL=http://127.0.0.1:11434` and install the configured model. For a hosted site that must work from any laptop on Ollama's free plan, set `OLLAMA_URL=https://ollama.com`, `OLLAMA_MODEL=gpt-oss:20b`, and store `OLLAMA_API_KEY` only in the hosting provider's secret environment variables. The API key is never sent to the browser.
 
 ## 9. AI Disclosure
 

@@ -37,6 +37,6 @@ services:
       - key: OLLAMA_URL
         value: https://ollama.com
       - key: OLLAMA_MODEL
-        value: deepseek-v4-pro
+        value: gpt-oss:20b
       - key: OLLAMA_API_KEY
         sync: false

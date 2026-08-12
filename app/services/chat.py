@@ -26,6 +26,19 @@ def clean_model_response(content):
 def ollama_headers(settings):
     return {"Authorization":f"Bearer {settings.ollama_api_key}"} if settings.ollama_api_key else {}
 
+def ollama_error_message(status_code,detail,model):
+    detail=(detail or "").strip()
+    lowered=detail.lower()
+    if status_code==401:
+        return "Ollama Cloud authentication failed. Check OLLAMA_API_KEY."
+    if status_code==403 and "requires a subscription" in lowered:
+        return f"The Ollama model '{model}' requires a paid subscription. Choose a free model or upgrade Ollama."
+    if status_code==403:
+        return f"Ollama Cloud denied access to '{model}': {detail or 'forbidden'}"
+    if "not found" in lowered:
+        return f"Ollama model '{model}' is unavailable."
+    return f"Ollama returned an error: {detail or status_code}"
+
 def _clean_summary(f):
     text=re.sub(r"\s+"," ",(f.summary or f.title or "").strip())
     return text[:900].rstrip()+("…" if len(text)>900 else "")
@@ -114,9 +127,7 @@ async def ollama_answer(f,history,settings):
         detail=""
         try: detail=exc.response.json().get("error","")
         except Exception: pass
-        if exc.response.status_code in (401,403): raise RuntimeError("Ollama Cloud authentication failed. Check OLLAMA_API_KEY.") from exc
-        if "not found" in detail.lower(): raise RuntimeError(f"DeepSeek model '{settings.ollama_model}' is unavailable in Ollama.") from exc
-        raise RuntimeError(f"Ollama returned an error: {detail or exc.response.status_code}") from exc
+        raise RuntimeError(ollama_error_message(exc.response.status_code,detail,settings.ollama_model)) from exc
     content=clean_model_response(response.json().get("message",{}).get("content",""))
     if not content: raise RuntimeError("Ollama returned an empty response. Please retry.")
     return content
@@ -132,7 +143,7 @@ def site_system_prompt(setup,findings):
             f"URL: {f.url} | Summary: {summary}"
         )
     finding_context="\n".join(rows) or "No findings are currently available for this setup and view."
-    return f"""You are the site-wide My ThreatLens AI assistant, powered by DeepSeek through Ollama. Help the user understand and use the application and analyze the supplied workspace context.
+    return f"""You are the site-wide My ThreatLens AI assistant, powered by an open model through Ollama. Help the user understand and use the application and analyze the supplied workspace context.
 
 SITE CAPABILITIES
 - Setups define technologies, security keywords, public intelligence sources, and a date range.
@@ -180,16 +191,12 @@ async def ollama_site_answer(setup,findings,history,settings):
     except httpx.ConnectError as exc:
         raise RuntimeError("Ollama is not reachable. Check the hosted Ollama configuration, then try again.") from exc
     except httpx.TimeoutException as exc:
-        raise RuntimeError("DeepSeek took too long to respond. Please try again.") from exc
+        raise RuntimeError("The AI model took too long to respond. Please try again.") from exc
     except httpx.HTTPStatusError as exc:
         detail=""
         try: detail=exc.response.json().get("error","")
         except Exception: pass
-        if exc.response.status_code in (401,403):
-            raise RuntimeError("Ollama Cloud authentication failed. Check OLLAMA_API_KEY.") from exc
-        if "not found" in detail.lower():
-            raise RuntimeError(f"DeepSeek model '{settings.ollama_model}' is unavailable in Ollama.") from exc
-        raise RuntimeError(f"Ollama returned an error: {detail or exc.response.status_code}") from exc
+        raise RuntimeError(ollama_error_message(exc.response.status_code,detail,settings.ollama_model)) from exc
     content=clean_model_response(response.json().get("message",{}).get("content",""))
-    if not content: raise RuntimeError("DeepSeek returned an empty response. Please retry.")
+    if not content: raise RuntimeError("The AI model returned an empty response. Please retry.")
     return content

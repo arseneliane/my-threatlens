@@ -6,7 +6,7 @@ from app.services.imports.service import sample_xlsx, sample_docx, preview
 from types import SimpleNamespace
 from app.main import quick_summary
 from app.main import utc_publication_date
-from app.services.chat import clean_model_response, ollama_headers, site_system_prompt
+from app.services.chat import clean_model_response, ollama_error_message, ollama_headers, site_system_prompt
 from app.services.collectors.fixtures import ITEMS
 from app.services.collectors.rss import SOURCE_FEEDS, parse_feed, parse_nvd
 
@@ -57,6 +57,9 @@ def test_site_chat_prompt_contains_scope_and_untrusted_data_boundary():
 def test_ollama_cloud_key_stays_in_server_authorization_header():
     assert ollama_headers(SimpleNamespace(ollama_api_key="secret-key"))=={"Authorization":"Bearer secret-key"}
     assert ollama_headers(SimpleNamespace(ollama_api_key=""))=={}
+def test_ollama_subscription_error_is_not_mislabeled_as_authentication():
+    message=ollama_error_message(403,"this model requires a subscription","paid-model")
+    assert "subscription" in message.lower() and "authentication" not in message.lower()
 def test_fixture_links_are_direct_public_resources():
     assert all("/example" not in item["url"] for item in ITEMS)
     assert all(item["url"].startswith("https://") for item in ITEMS)

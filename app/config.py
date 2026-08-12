@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     zoho_accounts_base_url: str = "https://accounts.zoho.com"
     zoho_mail_base_url: str = "https://mail.zoho.com"
     ollama_url: str = "http://127.0.0.1:11434"
-    ollama_model: str = "deepseek-v4-pro"
+    ollama_model: str = "gpt-oss:20b"
     ollama_api_key: str = ""
     ollama_timeout_seconds: int = 120
     model_config = SettingsConfigDict(env_file=ROOT / ".env", extra="ignore")

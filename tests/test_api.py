@@ -198,12 +198,12 @@ def test_site_chat_uses_workspace_context(client,monkeypatch):
     captured={}
     async def fake_site_ollama(setup,findings,history,settings):
         captured.update(setup=setup.display_name,findings=len(findings),question=history[-1]["content"],model=settings.ollama_model)
-        return "Workspace-level DeepSeek response"
+        return "Workspace-level Ollama response"
     monkeypatch.setattr("app.main.ollama_site_answer",fake_site_ollama)
     response=client.post("/api/site-chat",json={"question":"What should I prioritize?"})
-    assert response.status_code==200 and response.json()["message"]["content"]=="Workspace-level DeepSeek response"
+    assert response.status_code==200 and response.json()["message"]["content"]=="Workspace-level Ollama response"
     assert captured["setup"] and captured["question"]=="What should I prioritize?"
-    assert captured["model"].startswith("deepseek")
+    assert captured["model"]=="gpt-oss:20b"
     history=client.get("/api/site-chat").json()["messages"]
     assert [message["role"] for message in history]==["user","assistant"]
     assert client.delete("/api/site-chat").json()["deleted"] is True
