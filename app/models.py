@@ -8,7 +8,11 @@ def now(): return datetime.now(timezone.utc)
 class Setup(Base):
     __tablename__ = "setups"
     id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String(120), unique=True)
+    # `name` is an internal globally unique key. `display_name` is scoped to a
+    # browser workspace and is the only name exposed through the API.
+    name: Mapped[str] = mapped_column(String(220), unique=True)
+    display_name: Mapped[str] = mapped_column(String(120), default="Default Setup", index=True)
+    owner_id: Mapped[str] = mapped_column(String(64), default="legacy", index=True)
     description: Mapped[str] = mapped_column(Text, default="")
     technologies: Mapped[list] = mapped_column(JSON, default=list)
     keywords: Mapped[list] = mapped_column(JSON, default=list)
@@ -86,4 +90,3 @@ class AuditEvent(Base):
     action: Mapped[str] = mapped_column(String(80))
     details: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
-

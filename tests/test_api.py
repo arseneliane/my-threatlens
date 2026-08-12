@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from openpyxl import load_workbook
 def test_home_active_name(client):
     r=client.get("/"); assert r.status_code==200 and "Default Setup" in r.text
+    assert f'{client.cookies.get("threatlens_client")}:' not in r.text
     assert "Last 90 days" in r.text and "Custom range" in r.text
     assert "Publication Date &amp; Time" in r.text
     js=client.get("/static/app.js"); assert "function renderImportPreview()" in js.text
@@ -43,6 +44,22 @@ def test_hosted_demo_authentication(client,monkeypatch):
     token=base64.b64encode(b"supervisor:correct-horse-battery-staple").decode()
     allowed=client.get("/",headers={"Authorization":f"Basic {token}"})
     assert allowed.status_code==200 and allowed.headers["x-frame-options"]=="DENY"
+
+def test_browser_workspaces_are_isolated_and_locally_backed_up(client):
+    from fastapi.testclient import TestClient
+    with TestClient(client.app) as second:
+        assert client.get("/").status_code==200 and second.get("/").status_code==200
+        created=client.post("/api/setups",json={"name":"Laptop Only","technologies":["Windows 11"],"keywords":["CVE"],"sources":["CISA"],"date_range":"7d"})
+        assert created.status_code==201
+        assert "Laptop Only" in [setup["name"] for setup in client.get("/api/setups").json()]
+        assert "Laptop Only" not in [setup["name"] for setup in second.get("/api/setups").json()]
+        assert client.cookies.get("threatlens_client")!=second.cookies.get("threatlens_client")
+        workspace=client.get("/api/workspace").json()
+        restored=second.post("/api/workspace/restore",json={"setups":[{"name":"Recovered Setup","technologies":["Windows 11"],"keywords":["CVE"],"sources":["CISA"],"date_range":"7d"}],"active_name":"Recovered Setup"})
+        assert restored.status_code==200 and restored.json()["active"]["name"]=="Recovered Setup"
+        assert workspace["instance_id"]==restored.json()["instance_id"]
+    js=client.get("/static/app.js").text
+    assert "localStorage.setItem(WORKSPACE_CACHE_KEY" in js and 'fetch("/api/workspace/restore"' in js
 def test_custom_date_range_persists(client):
     data={"name":"Custom Dates","technologies":[],"keywords":[],"sources":[],"date_range":"custom","start_date":"2026-06-01","end_date":"2026-07-30"}
     created=client.post("/api/setups",json=data); assert created.status_code==201

@@ -25,7 +25,8 @@ def create_workbook(findings, setup, filters):
         for cell in row: cell.alignment=Alignment(vertical="top",wrap_text=True)
     for cell in ws[1]: cell.fill=PatternFill("solid",fgColor="075985"); cell.font=Font(color="FFFFFF",bold=True)
     ctx=wb.create_sheet("Export Context")
-    rows=[("Exported At",datetime.now(timezone.utc).isoformat()),("Active Setup Name",setup.name),("Selected Technologies",", ".join(setup.technologies)),("Selected Keywords",", ".join(setup.keywords)),("Selected Sources",", ".join(setup.sources)),("Date Range",setup.date_range),("Active Filters",str(filters)),("Total Exported Findings",len(findings))]
+    setup_name=getattr(setup,"display_name",setup.name)
+    rows=[("Exported At",datetime.now(timezone.utc).isoformat()),("Active Setup Name",setup_name),("Selected Technologies",", ".join(setup.technologies)),("Selected Keywords",", ".join(setup.keywords)),("Selected Sources",", ".join(setup.sources)),("Date Range",setup.date_range),("Active Filters",str(filters)),("Total Exported Findings",len(findings))]
     for r in rows: ctx.append(r)
     details=wb.create_sheet("Finding Details"); details.append(["Finding","CVSS","EPSS","KEV","Severity basis","AI reason","Evidence links","Notes"])
     extra=wb.create_sheet("Additional CVEs"); extra.append(["Finding","Additional CVE"])

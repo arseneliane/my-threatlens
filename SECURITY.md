@@ -4,4 +4,6 @@ The default build makes no arbitrary outbound requests. Uploads accept only `.xl
 
 Internet-hosted demonstrations must set `REQUIRE_DEMO_AUTH=true`, a non-empty `DEMO_USERNAME`, and a unique `DEMO_PASSWORD` of at least 12 characters. The application refuses to start when hosted-demo authentication is enabled without valid credentials. Do not deploy `.env`, SMTP credentials, or the local SQLite database.
 
+Browser workspaces are separated by a random, HTTP-only, same-site cookie. Setup configuration is also backed up in that browser's `localStorage` so it can be restored after temporary Render storage is reset. Findings, review notes, chat messages, credentials, and authentication secrets are never written to `localStorage`. This is convenient isolation for a demonstration, not identity-based authorization for a production multi-user system.
+
 Before enabling custom URLs, require HTTP(S), reject credentials, resolve and reject loopback/private/link-local targets before every request and redirect, cap redirects/size/time/content type, use no cookies, execute no JavaScript, sanitize extracted HTML, and log blocked attempts with correlation IDs.

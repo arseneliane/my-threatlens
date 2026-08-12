@@ -29,7 +29,7 @@ Collectors feed a normalization and enrichment pipeline. A finding is retained o
 
 ## 6. Privacy and Security
 
-Only saved setup configuration is persisted in the local SQLite database. Findings, scans, reviews, and chat messages remain in memory, are replaced by the next scan, and disappear when the application closes. SMTP credentials are read only from the local `.env` file and are never sent to the browser. There are no accounts or analytics.
+Each browser receives an anonymous workspace cookie, so setup changes made on one browser or device do not affect another. The browser also keeps a local backup of setup configuration and restores it after a temporary hosted server restart. Findings, scans, reviews, and chat messages are not placed in browser storage and remain temporary. Clearing site data or using private browsing creates a new workspace. SMTP credentials are read only from the local `.env` file and are never sent to the browser. There are no user accounts or analytics.
 
 ### Email setup
 

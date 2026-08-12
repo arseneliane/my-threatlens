@@ -1,4 +1,4 @@
-import asyncio, base64, binascii, hashlib, itertools, math, secrets, smtplib, uuid
+import asyncio, base64, binascii, hashlib, itertools, math, re, secrets, smtplib, uuid
 from datetime import date, datetime, timezone, timedelta
 from pathlib import Path
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Request, BackgroundTasks
@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
-from sqlalchemy import delete as sql_delete, select, func, update, and_
+from sqlalchemy import delete as sql_delete, select, func, update, and_, inspect
 from sqlalchemy.orm import Session
 from .config import settings
 from .database import Base, engine, get_db, SessionLocal
@@ -29,10 +29,16 @@ SCANS_CACHE={}
 CHAT_CACHE={}
 FINDING_IDS=itertools.count(1)
 SCAN_IDS=itertools.count(1)
+INSTANCE_ID=str(uuid.uuid4())
+CLIENT_COOKIE="threatlens_client"
 
 @app.middleware("http")
 async def protect_hosted_demo(request:Request,call_next):
     """Require HTTP Basic authentication when the hosted-demo flag is enabled."""
+    client_id=request.cookies.get(CLIENT_COOKIE,"")
+    new_client=not re.fullmatch(r"[A-Za-z0-9_-]{32,64}",client_id)
+    if new_client: client_id=secrets.token_urlsafe(32)
+    request.state.client_id=client_id
     if settings.require_demo_auth and request.url.path!="/healthz":
         authorized=False
         authorization=request.headers.get("authorization","")
@@ -44,13 +50,16 @@ async def protect_hosted_demo(request:Request,call_next):
             except (binascii.Error,UnicodeDecodeError,ValueError):
                 pass
         if not authorized:
-            return Response(
+            response=Response(
                 "Authentication required.",
                 status_code=401,
                 media_type="text/plain",
                 headers={"WWW-Authenticate":'Basic realm="My ThreatLens supervisor demo"',"Cache-Control":"no-store"},
             )
-    response=await call_next(request)
+        else: response=await call_next(request)
+    else: response=await call_next(request)
+    if new_client:
+        response.set_cookie(CLIENT_COOKIE,client_id,max_age=31_536_000,httponly=True,secure=settings.require_demo_auth,samesite="strict")
     response.headers.setdefault("X-Content-Type-Options","nosniff")
     response.headers.setdefault("X-Frame-Options","DENY")
     response.headers.setdefault("Referrer-Policy","strict-origin-when-cross-origin")
@@ -67,7 +76,38 @@ class EmailIn(BaseModel):
     subject:str="My ThreatLens findings report"
     message:str="Attached is the requested My ThreatLens findings report."
 
-def serial_setup(s): return {k:getattr(s,k) for k in ("id","name","description","technologies","keywords","sources","date_range","start_date","end_date","active","next_scan_at","last_scan_at")}
+class WorkspaceRestore(BaseModel):
+    setups:list[SetupIn]
+    active_name:str|None=None
+
+def serial_setup(s):
+    result={k:getattr(s,k) for k in ("id","description","technologies","keywords","sources","date_range","start_date","end_date","active","next_scan_at","last_scan_at")}
+    result["name"]=s.display_name
+    return result
+
+def internal_setup_name(owner_id,display_name): return f"{owner_id}:{uuid.uuid4().hex}:{display_name}"
+
+def ensure_workspace(db,owner_id):
+    rows=db.scalars(select(Setup).where(Setup.owner_id==owner_id).order_by(Setup.id)).all()
+    if not rows:
+        # Preserve pre-upgrade local setups by assigning them to the first browser.
+        rows=db.scalars(select(Setup).where(Setup.owner_id=="legacy").order_by(Setup.id)).all()
+        if rows:
+            for setup in rows:
+                setup.owner_id=owner_id
+                setup.display_name=setup.display_name or setup.name
+                setup.name=internal_setup_name(owner_id,setup.display_name)
+        else:
+            rows=[Setup(name=internal_setup_name(owner_id,"Default Setup"),display_name="Default Setup",owner_id=owner_id,active=True,technologies=["Windows 11","Outlook Web Access","Exchange Server","FortiGate"],keywords=["CVE","Exploit","RCE","Authentication Bypass"],sources=["BleepingComputer","CISA","Microsoft MSRC"],next_scan_at=datetime.now(timezone.utc)+timedelta(seconds=settings.scan_interval_seconds))]
+            db.add(rows[0])
+        db.commit()
+    active=next((setup for setup in rows if setup.active),None)
+    if not active:
+        rows[0].active=True; db.commit(); active=rows[0]
+    return active
+
+def owned_setup(db,owner_id,sid):
+    return db.scalar(select(Setup).where(Setup.id==sid,Setup.owner_id==owner_id))
 def quick_summary(f):
     source_text=(f.summary or f.title or "A security finding was identified.").strip()
     if source_text and source_text[-1] not in ".!?": source_text+="."
@@ -138,11 +178,21 @@ def scoped_findings(db,setup,params):
         source_order=next_round
     return diversified
 
-def cached_finding(fid):
-    return next((finding for rows in FINDINGS_CACHE.values() for finding in rows if finding.id==fid),None)
+def cached_finding(fid,db=None,owner_id=None):
+    finding=next((finding for rows in FINDINGS_CACHE.values() for finding in rows if finding.id==fid),None)
+    if finding and db and owner_id and not owned_setup(db,owner_id,finding.setup_id): return None
+    return finding
 
 @app.on_event("startup")
 def startup():
+    if settings.database_url.startswith("sqlite"):
+        with engine.begin() as conn:
+            if "setups" in inspect(conn).get_table_names():
+                columns={column["name"] for column in inspect(conn).get_columns("setups")}
+                if "display_name" not in columns: conn.exec_driver_sql("ALTER TABLE setups ADD COLUMN display_name VARCHAR(120)")
+                if "owner_id" not in columns: conn.exec_driver_sql("ALTER TABLE setups ADD COLUMN owner_id VARCHAR(64)")
+                conn.exec_driver_sql("UPDATE setups SET display_name=name WHERE display_name IS NULL OR display_name='' ")
+                conn.exec_driver_sql("UPDATE setups SET owner_id='legacy' WHERE owner_id IS NULL OR owner_id='' ")
     if settings.require_demo_auth and (not settings.demo_username or len(settings.demo_password)<12):
         raise RuntimeError("Hosted demo authentication requires DEMO_USERNAME and a DEMO_PASSWORD of at least 12 characters.")
     Base.metadata.create_all(engine)
@@ -150,8 +200,6 @@ def startup():
         # Remove legacy persisted operational data. Only saved setup configuration remains durable.
         db.execute(sql_delete(SourceStatus)); db.execute(sql_delete(ChatMessage)); db.execute(sql_delete(Finding)); db.execute(sql_delete(Scan))
         FINDINGS_CACHE.clear(); SCANS_CACHE.clear(); CHAT_CACHE.clear()
-        if not db.scalar(select(func.count()).select_from(Setup)):
-            db.add(Setup(name="Default Setup",active=True,technologies=["Windows 11","Outlook Web Access","Exchange Server","FortiGate"],keywords=["CVE","Exploit","RCE","Authentication Bypass"],sources=["BleepingComputer","CISA","Microsoft MSRC"],next_scan_at=datetime.now(timezone.utc)+timedelta(seconds=settings.scan_interval_seconds)))
         db.commit()
 
 @app.exception_handler(Exception)
@@ -161,43 +209,71 @@ async def errors(request, exc):
 
 @app.get("/",response_class=HTMLResponse)
 def home(request:Request,db:Session=Depends(get_db)):
-    active=db.scalar(select(Setup).where(Setup.active==True))
+    active=ensure_workspace(db,request.state.client_id)
     return templates.TemplateResponse(request,"index.html",{"active":active})
 @app.get("/healthz",include_in_schema=False)
 def healthz(): return {"status":"ok"}
 @app.get("/about",response_class=HTMLResponse)
 def about(request:Request): return templates.TemplateResponse(request,"about.html",{"version":"1.0.0"})
+@app.get("/api/workspace")
+def workspace(request:Request,db:Session=Depends(get_db)):
+    active=ensure_workspace(db,request.state.client_id)
+    rows=db.scalars(select(Setup).where(Setup.owner_id==request.state.client_id).order_by(Setup.display_name)).all()
+    return {"instance_id":INSTANCE_ID,"active":serial_setup(active),"setups":[serial_setup(s) for s in rows]}
+@app.post("/api/workspace/restore")
+def restore_workspace(data:WorkspaceRestore,request:Request,db:Session=Depends(get_db)):
+    owner=request.state.client_id
+    incoming=data.setups[:50] or [SetupIn(name="Default Setup",technologies=["Windows 11"],keywords=["CVE"],sources=["CISA"])]
+    unique=[]; names=set()
+    for item in incoming:
+        clean=item.name.strip()[:120] or "Untitled Setup"
+        if clean not in names: names.add(clean); unique.append((item,clean))
+    for setup in db.scalars(select(Setup).where(Setup.owner_id==owner)).all():
+        for finding in FINDINGS_CACHE.pop(setup.id,[]): CHAT_CACHE.pop(finding.id,None)
+        db.delete(setup)
+    db.flush()
+    restored=[]
+    for item,name in unique:
+        values=item.model_dump(); values["name"]=internal_setup_name(owner,name)
+        setup=Setup(**values,display_name=name,owner_id=owner,active=name==data.active_name,next_scan_at=datetime.now(timezone.utc)+timedelta(seconds=300)); db.add(setup); restored.append(setup)
+    if restored and not any(s.active for s in restored): restored[0].active=True
+    db.commit()
+    return {"instance_id":INSTANCE_ID,"active":serial_setup(next(s for s in restored if s.active)),"setups":[serial_setup(s) for s in restored]}
 @app.get("/api/setups")
-def setups(db:Session=Depends(get_db)): return [serial_setup(s) for s in db.scalars(select(Setup).order_by(Setup.name)).all()]
+def setups(request:Request,db:Session=Depends(get_db)):
+    ensure_workspace(db,request.state.client_id)
+    return [serial_setup(s) for s in db.scalars(select(Setup).where(Setup.owner_id==request.state.client_id).order_by(Setup.display_name)).all()]
 @app.post("/api/setups",status_code=201)
-def create_setup(data:SetupIn,db:Session=Depends(get_db)):
-    if db.scalar(select(Setup).where(Setup.name==data.name)): raise HTTPException(409,"A setup with this name already exists.")
-    db.execute(update(Setup).values(active=False)); s=Setup(**data.model_dump(),active=True,next_scan_at=datetime.now(timezone.utc)+timedelta(seconds=300)); db.add(s); db.commit(); return serial_setup(s)
+def create_setup(data:SetupIn,request:Request,db:Session=Depends(get_db)):
+    owner=request.state.client_id
+    ensure_workspace(db,owner)
+    if db.scalar(select(Setup).where(Setup.owner_id==owner,Setup.display_name==data.name)): raise HTTPException(409,"A setup with this name already exists.")
+    db.execute(update(Setup).where(Setup.owner_id==owner).values(active=False)); values=data.model_dump(); values["name"]=internal_setup_name(owner,data.name); s=Setup(**values,display_name=data.name,owner_id=owner,active=True,next_scan_at=datetime.now(timezone.utc)+timedelta(seconds=300)); db.add(s); db.commit(); return serial_setup(s)
 @app.put("/api/setups/{sid}")
-def save_setup(sid:int,data:SetupIn,db:Session=Depends(get_db)):
-    s=db.get(Setup,sid)
+def save_setup(sid:int,data:SetupIn,request:Request,db:Session=Depends(get_db)):
+    owner=request.state.client_id; s=owned_setup(db,owner,sid)
     if not s: raise HTTPException(404,"Setup not found.")
-    other=db.scalar(select(Setup).where(Setup.name==data.name,Setup.id!=sid))
+    other=db.scalar(select(Setup).where(Setup.owner_id==owner,Setup.display_name==data.name,Setup.id!=sid))
     if other: raise HTTPException(409,"A different setup already uses this name.")
-    for k,v in data.model_dump().items(): setattr(s,k,v)
+    for k,v in data.model_dump().items(): setattr(s,"display_name" if k=="name" else k,v)
     db.commit(); return serial_setup(s)
 @app.post("/api/setups/{sid}/activate")
-def activate(sid:int,db:Session=Depends(get_db)):
-    s=db.get(Setup,sid)
+def activate(sid:int,request:Request,db:Session=Depends(get_db)):
+    owner=request.state.client_id; s=owned_setup(db,owner,sid)
     if not s: raise HTTPException(404,"Setup not found.")
-    db.execute(update(Setup).values(active=False)); s.active=True; db.commit(); return serial_setup(s)
+    db.execute(update(Setup).where(Setup.owner_id==owner).values(active=False)); s.active=True; db.commit(); return serial_setup(s)
 @app.post("/api/setups/{sid}/duplicate")
-def duplicate(sid:int,db:Session=Depends(get_db)):
-    s=db.get(Setup,sid)
+def duplicate(sid:int,request:Request,db:Session=Depends(get_db)):
+    owner=request.state.client_id; s=owned_setup(db,owner,sid)
     if not s: raise HTTPException(404,"Setup not found.")
-    name=f"{s.name} Copy"; n=1
-    while db.scalar(select(Setup).where(Setup.name==name)): n+=1; name=f"{s.name} Copy {n}"
-    db.execute(update(Setup).values(active=False)); c=Setup(name=name,description=s.description,technologies=s.technologies,keywords=s.keywords,sources=s.sources,date_range=s.date_range,active=True,next_scan_at=datetime.now(timezone.utc)+timedelta(seconds=300)); db.add(c); db.commit(); return serial_setup(c)
+    name=f"{s.display_name} Copy"; n=1
+    while db.scalar(select(Setup).where(Setup.owner_id==owner,Setup.display_name==name)): n+=1; name=f"{s.display_name} Copy {n}"
+    db.execute(update(Setup).where(Setup.owner_id==owner).values(active=False)); c=Setup(name=internal_setup_name(owner,name),display_name=name,owner_id=owner,description=s.description,technologies=s.technologies,keywords=s.keywords,sources=s.sources,date_range=s.date_range,active=True,next_scan_at=datetime.now(timezone.utc)+timedelta(seconds=300)); db.add(c); db.commit(); return serial_setup(c)
 @app.delete("/api/setups/{sid}")
-def delete(sid:int,db:Session=Depends(get_db)):
-    s=db.get(Setup,sid)
+def delete(sid:int,request:Request,db:Session=Depends(get_db)):
+    owner=request.state.client_id; s=owned_setup(db,owner,sid)
     if not s: raise HTTPException(404,"Setup not found.")
-    if db.scalar(select(func.count()).select_from(Setup))<=1:
+    if db.scalar(select(func.count()).select_from(Setup).where(Setup.owner_id==owner))<=1:
         raise HTTPException(409,"The last setup cannot be deleted. Create another setup first.")
     was_active=s.active
     for finding in FINDINGS_CACHE.pop(sid,[]): CHAT_CACHE.pop(finding.id,None)
@@ -205,9 +281,9 @@ def delete(sid:int,db:Session=Depends(get_db)):
         if scan["setup_id"]==sid: SCANS_CACHE.pop(scan_id,None)
     db.delete(s)
     db.commit()
-    first=db.scalar(select(Setup))
+    first=db.scalar(select(Setup).where(Setup.owner_id==owner))
     if was_active: first.active=True
-    active=first if was_active or not db.scalar(select(Setup).where(Setup.active==True)) else db.scalar(select(Setup).where(Setup.active==True))
+    active=first if was_active or not db.scalar(select(Setup).where(Setup.owner_id==owner,Setup.active==True)) else db.scalar(select(Setup).where(Setup.owner_id==owner,Setup.active==True))
     db.commit()
     return {"deleted":True,"active":serial_setup(active)}
 
@@ -242,8 +318,8 @@ async def run_scan(scan_id):
         scan["message"]+=f" · {live_sources}/{len(sources)} sources live"
         setup.last_scan_at=datetime.now(timezone.utc); db.commit()
 @app.post("/api/scans",status_code=202)
-async def start_scan(bg:BackgroundTasks,db:Session=Depends(get_db)):
-    setup=db.scalar(select(Setup).where(Setup.active==True))
+async def start_scan(request:Request,bg:BackgroundTasks,db:Session=Depends(get_db)):
+    setup=ensure_workspace(db,request.state.client_id)
     if not setup: raise HTTPException(400,"No active setup.")
     running=next((scan for scan in SCANS_CACHE.values() if scan["setup_id"]==setup.id and scan["status"] in ("queued","running")),None)
     if running: raise HTTPException(409,"A scan is already running for this setup.")
@@ -252,23 +328,23 @@ async def start_scan(bg:BackgroundTasks,db:Session=Depends(get_db)):
     start=datetime.now(timezone.utc); setup.next_scan_at=start+timedelta(seconds=300); scan_id=next(SCAN_IDS); SCANS_CACHE[scan_id]={"id":scan_id,"setup_id":setup.id,"status":"queued","progress":0,"message":"Queued","findings_count":0,"sources":[]}; db.commit(); bg.add_task(run_scan,scan_id)
     return {"scan_id":scan_id,"status":"queued","next_scan_at":setup.next_scan_at}
 @app.get("/api/scans/{scan_id}")
-def scan_status(scan_id:int):
+def scan_status(scan_id:int,request:Request,db:Session=Depends(get_db)):
     s=SCANS_CACHE.get(scan_id)
-    if not s: raise HTTPException(404,"Scan not found.")
+    if not s or not owned_setup(db,request.state.client_id,s["setup_id"]): raise HTTPException(404,"Scan not found.")
     return {k:s[k] for k in ("id","status","progress","message","findings_count","sources")}
 @app.get("/api/findings")
 def findings(request:Request,page:int=1,page_size:int=settings.results_page_size,db:Session=Depends(get_db)):
-    setup=db.scalar(select(Setup).where(Setup.active==True)); params=dict(request.query_params)
+    setup=ensure_workspace(db,request.state.client_id); params=dict(request.query_params)
     all_rows=scoped_findings(db,setup,params); total=len(all_rows); pages=max(1,math.ceil(total/page_size)); page=max(1,min(page,pages)); rows=all_rows[(page-1)*page_size:page*page_size]
     return {"items":[{"id":f.id,"severity":f.severity,"severity_basis":f.severity_basis,"technology":f.technology,"matched_technologies":f.matched_technologies,"matched_keywords":f.matched_keywords,"title":f.title,"summary":f.summary,"ai_summary":quick_summary(f),"url":f.url,"publication_date":f.publication_date,"cves":f.cves,"source":f.source,"ai_score":f.ai_score,"ai_confidence":f.ai_confidence,"ai_reason":f.ai_reason,"review_state":f.review_state,"notes":f.notes,"checklist":f.checklist} for f in rows],"page":page,"pages":pages,"total":total}
 @app.put("/api/findings/{fid}/review")
-def review(fid:int,data:ReviewIn,db:Session=Depends(get_db)):
-    f=cached_finding(fid)
+def review(fid:int,data:ReviewIn,request:Request,db:Session=Depends(get_db)):
+    f=cached_finding(fid,db,request.state.client_id)
     if not f: raise HTTPException(404,"Finding not found.")
     f.notes=data.notes; f.review_state=data.review_state; f.checklist=data.checklist; return {"saved":True}
 @app.post("/api/findings/{fid}/chat")
-async def chat(fid:int,data:ChatIn,db:Session=Depends(get_db)):
-    f=cached_finding(fid)
+async def chat(fid:int,data:ChatIn,request:Request,db:Session=Depends(get_db)):
+    f=cached_finding(fid,db,request.state.client_id)
     if not f: raise HTTPException(404,"Finding not found.")
     history=CHAT_CACHE.setdefault(fid,[])
     pending=ChatMessage(finding_id=fid,role="user",content=data.question.strip(),created_at=datetime.now(timezone.utc))
@@ -277,22 +353,23 @@ async def chat(fid:int,data:ChatIn,db:Session=Depends(get_db)):
     reply=ChatMessage(finding_id=fid,role="assistant",content=content,created_at=datetime.now(timezone.utc)); history.extend([pending,reply])
     return {"message":{"role":"assistant","content":content},"model":settings.ollama_model}
 @app.get("/api/findings/{fid}/chat")
-def chat_history(fid:int,db:Session=Depends(get_db)):
-    if not cached_finding(fid): raise HTTPException(404,"Finding not found.")
+def chat_history(fid:int,request:Request,db:Session=Depends(get_db)):
+    if not cached_finding(fid,db,request.state.client_id): raise HTTPException(404,"Finding not found.")
     messages=CHAT_CACHE.get(fid,[])
     return {"messages":[{"role":m.role,"content":m.content,"created_at":m.created_at} for m in messages],"model":settings.ollama_model}
 @app.delete("/api/findings/{fid}/chat")
-def clear_chat(fid:int,db:Session=Depends(get_db)):
+def clear_chat(fid:int,request:Request,db:Session=Depends(get_db)):
+    if not cached_finding(fid,db,request.state.client_id): raise HTTPException(404,"Finding not found.")
     CHAT_CACHE.pop(fid,None); return {"deleted":True}
 @app.get("/api/export")
 def export(request:Request,db:Session=Depends(get_db)):
-    setup=db.scalar(select(Setup).where(Setup.active==True)); params=dict(request.query_params); rows=scoped_findings(db,setup,params)
+    setup=ensure_workspace(db,request.state.client_id); params=dict(request.query_params); rows=scoped_findings(db,setup,params)
     timestamp=datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
     filename=f"My-ThreatLens-Results-{timestamp}.xlsx"
     return Response(create_workbook(rows,setup,params),media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",headers={"Content-Disposition":f'attachment; filename="{filename}"'})
 @app.post("/api/email")
 def email_findings(data:EmailIn,request:Request,db:Session=Depends(get_db)):
-    setup=db.scalar(select(Setup).where(Setup.active==True)); params={k:v for k,v in request.query_params.items() if k!="page"}
+    setup=ensure_workspace(db,request.state.client_id); params={k:v for k,v in request.query_params.items() if k!="page"}
     rows=scoped_findings(db,setup,params)
     try: send_findings_email(settings,data.recipient,data.subject,data.message,rows,setup)
     except ValueError as exc: raise HTTPException(422,str(exc))
