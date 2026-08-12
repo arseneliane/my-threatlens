@@ -28,6 +28,9 @@ def test_home_active_name(client):
     assert 'value==="undefined"' in js.text
     assert 'id="pagination" class="pagination" hidden' in r.text
     assert '$("#pagination").hidden=j.pages<=1' in js.text
+    assert 'id="biggestThreat"' in r.text and "function renderBiggestThreat(f)" in js.text
+    assert "Email this threat" in js.text and "finding_id" in js.text
+    assert client.get("/static/biggest-threat.css").status_code==200
     about=client.get("/about"); assert about.status_code==200 and 'id="appSidebar"' in about.text
     assert 'id="siteChatLauncher"' in about.text and '/static/site-chat.js' in about.text
     assert "/?open=setups" in about.text and "/?open=import" in about.text
@@ -90,7 +93,7 @@ def test_email_requires_valid_address_and_configuration(client,monkeypatch):
     monkeypatch.setattr(settings,"smtp_password","")
     unconfigured=client.post("/api/email",json={"recipient":"analyst@example.com","subject":"Report","message":"Attached"})
     assert unconfigured.status_code==503 and "SMTP_PASSWORD" in unconfigured.json()["detail"]
-def test_scan_202_completion_filters_export(client):
+def test_scan_202_completion_filters_export(client,monkeypatch):
     setups=client.get("/api/setups").json(); default=next(s for s in setups if s["name"]=="Default Setup"); client.post(f'/api/setups/{default["id"]}/activate')
     r=client.post("/api/scans"); assert r.status_code==202
     sid=r.json()["scan_id"]
@@ -100,6 +103,12 @@ def test_scan_202_completion_filters_export(client):
         time.sleep(.03)
     assert status["status"]=="completed"
     result=client.get("/api/findings?severity=Critical").json(); assert result["page"]==1 and result["pages"]>=1
+    assert result["biggest"] and result["biggest"]["id"]
+    sent={}
+    monkeypatch.setattr("app.main.send_findings_email",lambda settings,recipient,subject,message,rows,setup:sent.update(rows=rows,subject=subject))
+    emailed=client.post(f'/api/email?finding_id={result["biggest"]["id"]}',json={"recipient":"supervisor@example.com","subject":"Biggest threat","message":"Review this threat."})
+    assert emailed.status_code==200 and emailed.json()["findings_count"]==1
+    assert len(sent["rows"])==1 and sent["rows"][0].id==result["biggest"]["id"]
     if result["items"]: assert result["items"][0]["ai_summary"] and result["items"][0]["ai_reason"]
     exp=client.get("/api/export?severity=Critical"); wb=load_workbook(BytesIO(exp.content))
     import re

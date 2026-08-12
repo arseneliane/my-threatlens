@@ -1,0 +1,33 @@
+.biggest-threat {
+  margin: 0 0 18px;
+  padding: 16px;
+  border: 1px solid #f0b6ad;
+  border-left: 5px solid #b42318;
+  border-radius: 10px;
+  background: #fff7f5;
+}
+
+.biggest-threat-label {
+  margin-bottom: 10px;
+  color: #b42318;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.biggest-threat-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.biggest-threat h2 { margin: 9px 0 4px; font-size: 18px; }
+.biggest-threat p, .biggest-threat small { margin: 0; color: var(--muted); }
+.biggest-threat-actions { display: flex; flex-shrink: 0; }
+
+@media (max-width: 600px) {
+  .biggest-threat-main { align-items: flex-start; flex-direction: column; }
+  .biggest-threat-actions { width: 100%; }
+}

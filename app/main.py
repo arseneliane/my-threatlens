@@ -184,6 +184,13 @@ def cached_finding(fid,db=None,owner_id=None):
     if finding and db and owner_id and not owned_setup(db,owner_id,finding.setup_id): return None
     return finding
 
+def serial_finding(f):
+    return {"id":f.id,"severity":f.severity,"severity_basis":f.severity_basis,"technology":f.technology,"matched_technologies":f.matched_technologies,"matched_keywords":f.matched_keywords,"title":f.title,"summary":f.summary,"ai_summary":quick_summary(f),"url":f.url,"publication_date":f.publication_date,"cves":f.cves,"source":f.source,"ai_score":f.ai_score,"ai_confidence":f.ai_confidence,"ai_reason":f.ai_reason,"review_state":f.review_state,"notes":f.notes,"checklist":f.checklist}
+
+def biggest_threat(rows):
+    severity_rank={"Critical":4,"High":3,"Medium":2,"Low":1,"Unknown":0}
+    return max(rows,key=lambda f:(severity_rank.get(f.severity,0),bool(f.kev),f.ai_score or 0,f.cvss or 0,utc_publication_date(f.publication_date)),default=None)
+
 @app.on_event("startup")
 def startup():
     if settings.database_url.startswith("sqlite"):
@@ -337,7 +344,8 @@ def scan_status(scan_id:int,request:Request,db:Session=Depends(get_db)):
 def findings(request:Request,page:int=1,page_size:int=settings.results_page_size,db:Session=Depends(get_db)):
     setup=ensure_workspace(db,request.state.client_id); params=dict(request.query_params)
     all_rows=scoped_findings(db,setup,params); total=len(all_rows); pages=max(1,math.ceil(total/page_size)); page=max(1,min(page,pages)); rows=all_rows[(page-1)*page_size:page*page_size]
-    return {"items":[{"id":f.id,"severity":f.severity,"severity_basis":f.severity_basis,"technology":f.technology,"matched_technologies":f.matched_technologies,"matched_keywords":f.matched_keywords,"title":f.title,"summary":f.summary,"ai_summary":quick_summary(f),"url":f.url,"publication_date":f.publication_date,"cves":f.cves,"source":f.source,"ai_score":f.ai_score,"ai_confidence":f.ai_confidence,"ai_reason":f.ai_reason,"review_state":f.review_state,"notes":f.notes,"checklist":f.checklist} for f in rows],"page":page,"pages":pages,"total":total}
+    biggest=biggest_threat(scoped_findings(db,setup,{}))
+    return {"items":[serial_finding(f) for f in rows],"biggest":serial_finding(biggest) if biggest else None,"page":page,"pages":pages,"total":total}
 @app.put("/api/findings/{fid}/review")
 def review(fid:int,data:ReviewIn,request:Request,db:Session=Depends(get_db)):
     f=cached_finding(fid,db,request.state.client_id)
@@ -397,9 +405,13 @@ def export(request:Request,db:Session=Depends(get_db)):
     filename=f"My-ThreatLens-Results-{timestamp}.xlsx"
     return Response(create_workbook(rows,setup,params),media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",headers={"Content-Disposition":f'attachment; filename="{filename}"'})
 @app.post("/api/email")
-def email_findings(data:EmailIn,request:Request,db:Session=Depends(get_db)):
+def email_findings(data:EmailIn,request:Request,finding_id:int|None=None,db:Session=Depends(get_db)):
     setup=ensure_workspace(db,request.state.client_id); params={k:v for k,v in request.query_params.items() if k!="page"}
-    rows=scoped_findings(db,setup,params)
+    if finding_id is not None:
+        finding=cached_finding(finding_id,db,request.state.client_id)
+        if not finding or finding.setup_id!=setup.id: raise HTTPException(404,"Finding not found.")
+        rows=[finding]
+    else: rows=scoped_findings(db,setup,params)
     try: send_findings_email(settings,data.recipient,data.subject,data.message,rows,setup)
     except ValueError as exc: raise HTTPException(422,str(exc))
     except EmailDeliveryError as exc: raise HTTPException(502,str(exc))
