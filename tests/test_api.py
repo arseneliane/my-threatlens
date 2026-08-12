@@ -1,0 +1,186 @@
+import time
+import base64
+from datetime import datetime, timezone
+from io import BytesIO
+from types import SimpleNamespace
+from openpyxl import load_workbook
+def test_home_active_name(client):
+    r=client.get("/"); assert r.status_code==200 and "Default Setup" in r.text
+    assert "Last 90 days" in r.text and "Custom range" in r.text
+    assert "Publication Date &amp; Time" in r.text
+    js=client.get("/static/app.js"); assert "function renderImportPreview()" in js.text
+    assert "function formatPublicationDate(value)" in js.text and 'timeZoneName:"short"' in js.text
+    assert "active-pill" in js.text and client.get("/static/setups.css").status_code==200
+    assert "function setScanVisual" in js.text and client.get("/static/scan.css").status_code==200
+    assert "shield-shape" in r.text and "Click Scan Now" in r.text
+    assert "/static/my-threatlens-logo.png" in r.text
+    assert client.get("/static/my-threatlens-logo.png").status_code==200
+    assert 'id="appSidebar"' in r.text and "function toggleSidebar()" in js.text
+    assert client.get("/static/sidebar.css").status_code==200
+    assert client.get("/static/review.css").status_code==200
+    assert "function saveChecklist(id)" in js.text and "Save Review" not in js.text
+    assert "function detailCves(cves)" in js.text and "Show ${links.length-8} more CVEs" in js.text
+    assert "function renderFindingChat(messages)" in js.text and "async function loadFindingChat(id)" in js.text
+    assert 'value==="undefined"' in js.text
+    assert 'id="pagination" class="pagination" hidden' in r.text
+    assert '$("#pagination").hidden=j.pages<=1' in js.text
+    about=client.get("/about"); assert about.status_code==200 and 'id="appSidebar"' in about.text
+    assert "/?open=setups" in about.text and "/?open=import" in about.text
+    assert 'new URLSearchParams(location.search).get("open")' in js.text
+    assert 'link.download=`My-ThreatLens-Results-${stamp}.xlsx`' in js.text
+    assert "scopeDirty=true" in js.text and "showPendingScopeState()" in js.text
+    assert "Save the setup or run a scan" in js.text
+    assert "Scanning selected sources for fresh findings" in js.text
+
+def test_hosted_demo_authentication(client,monkeypatch):
+    from app.config import settings
+    monkeypatch.setattr(settings,"require_demo_auth",True)
+    monkeypatch.setattr(settings,"demo_username","supervisor")
+    monkeypatch.setattr(settings,"demo_password","correct-horse-battery-staple")
+    denied=client.get("/")
+    assert denied.status_code==401 and denied.headers["www-authenticate"].startswith("Basic")
+    assert client.get("/healthz").status_code==200
+    token=base64.b64encode(b"supervisor:correct-horse-battery-staple").decode()
+    allowed=client.get("/",headers={"Authorization":f"Basic {token}"})
+    assert allowed.status_code==200 and allowed.headers["x-frame-options"]=="DENY"
+def test_custom_date_range_persists(client):
+    data={"name":"Custom Dates","technologies":[],"keywords":[],"sources":[],"date_range":"custom","start_date":"2026-06-01","end_date":"2026-07-30"}
+    created=client.post("/api/setups",json=data); assert created.status_code==201
+    saved=created.json(); assert saved["date_range"]=="custom" and saved["start_date"]=="2026-06-01" and saved["end_date"]=="2026-07-30"
+def test_setup_lifecycle(client):
+    data={"name":"Ops","technologies":["FortiGate"],"keywords":["Exploit"],"sources":["CISA"],"date_range":"7d"}
+    s=client.post("/api/setups",json=data); assert s.status_code==201
+    sid=s.json()["id"]; data["name"]="Ops Renamed"; assert client.put(f"/api/setups/{sid}",json=data).json()["name"]=="Ops Renamed"
+    assert client.post(f"/api/setups/{sid}/duplicate").status_code==200
+    assert client.post(f"/api/setups/{sid}/activate").json()["active"]
+    assert client.delete(f"/api/setups/{sid}").status_code==200
+def test_import_preview_validation(client):
+    from app.services.imports.service import sample_xlsx
+    r=client.post("/api/import/preview",files={"file":("setup.xlsx",sample_xlsx(),"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
+    assert r.status_code==200 and r.json()["Setup Name"]=="Sample Setup"
+    assert client.post("/api/import/preview",files={"file":("bad.txt",b"x","text/plain")}).status_code==400
+def test_email_requires_valid_address_and_configuration(client,monkeypatch):
+    invalid=client.post("/api/email",json={"recipient":"not-an-email","subject":"Report","message":"Attached"})
+    assert invalid.status_code==422 and "valid recipient" in invalid.json()["detail"]
+    from app.config import settings
+    monkeypatch.setattr(settings,"smtp_password","")
+    unconfigured=client.post("/api/email",json={"recipient":"analyst@example.com","subject":"Report","message":"Attached"})
+    assert unconfigured.status_code==503 and "SMTP_PASSWORD" in unconfigured.json()["detail"]
+def test_scan_202_completion_filters_export(client):
+    setups=client.get("/api/setups").json(); default=next(s for s in setups if s["name"]=="Default Setup"); client.post(f'/api/setups/{default["id"]}/activate')
+    r=client.post("/api/scans"); assert r.status_code==202
+    sid=r.json()["scan_id"]
+    for _ in range(30):
+        status=client.get(f"/api/scans/{sid}").json()
+        if status["status"]=="completed": break
+        time.sleep(.03)
+    assert status["status"]=="completed"
+    result=client.get("/api/findings?severity=Critical").json(); assert result["page"]==1 and result["pages"]>=1
+    if result["items"]: assert result["items"][0]["ai_summary"] and result["items"][0]["ai_reason"]
+    exp=client.get("/api/export?severity=Critical"); wb=load_workbook(BytesIO(exp.content))
+    import re
+    assert re.search(r'My-ThreatLens-Results-\d{8}-\d{6}\.xlsx',exp.headers["content-disposition"])
+    assert set(["Results","Export Context","Finding Details","Additional CVEs","Review Checklist"])<=set(wb.sheetnames)
+    assert wb["Results"].max_row-1==result["total"]
+
+def test_scan_count_uses_selected_date_range(client):
+    data={"name":"Recent Palo Alto","technologies":["Palo Alto Networks"],"keywords":["Exploit"],"sources":["The Hacker News"],"date_range":"1d"}
+    setup=client.post("/api/setups",json=data).json()
+    scan=client.post("/api/scans").json()
+    for _ in range(30):
+        status=client.get(f'/api/scans/{scan["scan_id"]}').json()
+        if status["status"]=="completed": break
+        time.sleep(.03)
+    visible=client.get("/api/findings").json()["total"]
+    assert status["findings_count"]==visible==0
+    assert "0 findings in selected date range" in status["message"]
+    assert "collected total" in status["message"]
+def test_delete_setup_with_scan_history(client):
+    data={"name":"Delete With History","technologies":["FortiGate"],"keywords":["Exploit"],"sources":["CISA"],"date_range":"7d"}
+    setup=client.post("/api/setups",json=data).json()
+    scan=client.post("/api/scans"); assert scan.status_code==202
+    sid=scan.json()["scan_id"]
+    for _ in range(30):
+        status=client.get(f"/api/scans/{sid}").json()
+        if status["status"]=="completed": break
+        time.sleep(.03)
+    deleted=client.delete(f'/api/setups/{setup["id"]}')
+    assert deleted.status_code==200 and deleted.json()["deleted"] is True
+    assert all(s["id"]!=setup["id"] for s in client.get("/api/setups").json())
+def test_scan_results_are_not_persisted_to_sqlite(client):
+    from sqlalchemy import func,select
+    from app.database import SessionLocal
+    from app.models import Finding,Scan,ChatMessage,SourceStatus
+    with SessionLocal() as db:
+        assert db.scalar(select(func.count()).select_from(Finding))==0
+        assert db.scalar(select(func.count()).select_from(Scan))==0
+        assert db.scalar(select(func.count()).select_from(ChatMessage))==0
+        assert db.scalar(select(func.count()).select_from(SourceStatus))==0
+def test_last_setup_cannot_be_deleted(client):
+    setups=client.get("/api/setups").json()
+    for setup in setups[1:]: client.delete(f'/api/setups/{setup["id"]}')
+    remaining=client.get("/api/setups").json()
+    assert len(remaining)==1
+    response=client.delete(f'/api/setups/{remaining[0]["id"]}')
+    assert response.status_code==409 and "last setup cannot be deleted" in response.json()["detail"]
+def test_launcher_replaces_only_older_threatlens_server():
+    launcher=open("START_MY_THREATLENS.bat",encoding="utf-8").read()
+    assert "Get-NetTCPConnection -LocalPort 8001" in launcher
+    assert "uvicorn.+app\\.main:app" in launcher
+    assert "Port 8001 is used by another application" in launcher
+def test_results_follow_active_setup_source_and_date_range(client):
+    setups=client.get("/api/setups").json()
+    target=setups[0]
+    client.post(f'/api/setups/{target["id"]}/activate')
+    payload={"name":target["name"],"description":"","technologies":["Exchange Server"],"keywords":["CVE"],"sources":["The Hacker News"],"date_range":"1d","start_date":None,"end_date":None}
+    assert client.put(f'/api/setups/{target["id"]}',json=payload).status_code==200
+    result=client.get("/api/findings").json()
+    assert all(item["source"]=="The Hacker News" and item["technology"]=="Exchange Server" for item in result["items"])
+def test_results_refresh_when_setup_keywords_change(client):
+    setup=client.post("/api/setups",json={"name":"Keyword Refresh","technologies":["Palo Alto Networks"],"keywords":["Exploit"],"sources":["The Hacker News"],"date_range":"7d"}).json()
+    scan=client.post("/api/scans").json()
+    for _ in range(30):
+        status=client.get(f'/api/scans/{scan["scan_id"]}').json()
+        if status["status"]=="completed": break
+        time.sleep(.03)
+    assert client.get("/api/findings").json()["total"]>0
+    changed={"name":setup["name"],"description":"","technologies":["Palo Alto Networks"],"keywords":["SQL Injection"],"sources":["The Hacker News"],"date_range":"7d","start_date":None,"end_date":None}
+    assert client.put(f'/api/setups/{setup["id"]}',json=changed).status_code==200
+    assert client.get("/api/findings").json()["total"]==0
+    changed["keywords"]=["RCE"]
+    assert client.put(f'/api/setups/{setup["id"]}',json=changed).status_code==200
+    rescan=client.post("/api/scans").json()
+    for _ in range(30):
+        status=client.get(f'/api/scans/{rescan["scan_id"]}').json()
+        if status["status"]=="completed": break
+        time.sleep(.03)
+    assert client.get("/api/findings").json()["total"]>0
+def test_custom_dates_hidden_by_default(client):
+    css=client.get("/static/date-range.css").text
+    assert ".customdates[hidden]" in css and "display: none" in css
+    sidebar_css=client.get("/static/sidebar.css").text
+    assert ".pagination[hidden]" in sidebar_css
+def test_chat_grounded(client,monkeypatch):
+    async def fake_ollama(finding,history,settings): return "Grounded local-model response"
+    monkeypatch.setattr("app.main.ollama_answer",fake_ollama)
+    findings=client.get("/api/findings").json()["items"]
+    if findings:
+        a=client.post(f'/api/findings/{findings[0]["id"]}/chat',json={"question":"Are we affected?"}).json()
+        assert a["message"]["content"]=="Grounded local-model response"
+        history=client.get(f'/api/findings/{findings[0]["id"]}/chat').json()["messages"]
+        assert [message["role"] for message in history[-2:]]==["user","assistant"]
+
+def test_chat_does_not_claim_unrelated_platform_is_affected():
+    from app.services.chat import answer
+    finding=SimpleNamespace(title="Cloud credential exposure",summary="Leaked credentials were used against AWS services.",technology="AWS",matched_technologies=["AWS"],matched_keywords=["Credential Stuffing"],source="Example",publication_date=datetime.now(timezone.utc),severity="High",severity_basis="Source assessment",cves=[],url="https://example.test/finding")
+    result=answer(finding,"How am I affected on Windows 11?")
+    assert "No direct impact on Windows 11" in result["direct_answer"]
+    assert "matches AWS, not Windows 11" in result["direct_answer"]
+    assert result["engine"]=="deterministic-grounded-v3"
+
+def test_chat_answers_about_a_matched_platform():
+    from app.services.chat import answer
+    finding=SimpleNamespace(title="Windows vulnerability",summary="A Windows Shell flaw allows privilege escalation.",technology="Windows 11",matched_technologies=["Windows 11"],matched_keywords=["Privilege Escalation"],source="Example",publication_date=datetime.now(timezone.utc),severity="High",severity_basis="CVSS",cves=["CVE-2026-12345"],url="https://example.test/finding")
+    result=answer(finding,"Am I vulnerable on Windows 11?")
+    assert "could be affected if you operate Windows 11" in result["direct_answer"]
+    assert any("CVE-2026-12345" in fact for fact in result["verified_facts"])

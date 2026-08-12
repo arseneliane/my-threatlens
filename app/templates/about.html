@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>About · My ThreatLens</title>
+  <link rel="icon" type="image/png" href="/static/my-threatlens-logo.png">
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/brand.css">
+  <link rel="stylesheet" href="/static/sidebar.css">
+</head>
+<body>
+  <header>
+    <div class="brand-area">
+      <img class="brand-logo" src="/static/my-threatlens-logo.png" alt="My ThreatLens">
+      <strong>About</strong>
+    </div>
+  </header>
+  <aside id="appSidebar" class="app-sidebar" aria-label="Main navigation">
+    <span class="sidebar-label">Menu</span>
+    <nav>
+      <a class="button" href="/?open=setups"><span class="nav-icon" aria-hidden="true">▣</span><span>Setups</span></a>
+      <a class="button" href="/?open=import"><span class="nav-icon" aria-hidden="true">⇩</span><span>Import</span></a>
+      <a class="button sidebar-save" href="/"><span class="nav-icon" aria-hidden="true">⌂</span><span>Dashboard</span></a>
+      <a class="button active-nav" href="/about" aria-current="page"><span class="nav-icon" aria-hidden="true">ⓘ</span><span>About</span></a>
+    </nav>
+  </aside>
+  <main class="about">
+    <h2>What it does</h2>
+    <p>My ThreatLens helps a cybersecurity analyst monitor selected technologies for relevant vulnerabilities, exploits, and public threat intelligence.</p>
+    <h2>How to use it</h2>
+    <ol>
+      <li>Choose technologies, keywords, trusted sources, and a date range.</li>
+      <li>Save the named setup and run a scan.</li>
+      <li>Filter findings, open reviews, ask grounded questions, and export the current filtered set to Excel.</li>
+    </ol>
+    <h2>Data privacy</h2>
+    <p>Setups, findings, notes, checklist state, and chat history are stored locally in SQLite. There are no accounts, analytics, or SMTP credentials.</p>
+    <h2>Sources</h2>
+    <p>The application is designed for approved government, vendor, and cybersecurity news feeds. The included offline fixture collector keeps tests deterministic.</p>
+    <h2>AI disclosure</h2>
+    <p>AI-assisted content may be incomplete or incorrect. Verify recommendations against the cited vendor advisory, CVE record, and your own environment before taking action. This app is still under testing and can be enhanced more.</p>
+    <h2>Known limitations</h2>
+    <p>Public sources can change, rate-limit, or become unavailable. This build uses deterministic fixtures by default; live collector validation requires network access.</p>
+    <h2>Version and testing status</h2>
+    <p>Version {{ version }}. Automated unit and API tests are included, with results documented in TEST_REPORT.md.</p>
+  </main>
+</body>
+</html>

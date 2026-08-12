@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: my-threatlens-demo
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
+    autoDeployTrigger: commit
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.11
+      - key: DATABASE_URL
+        value: sqlite:////tmp/my_threatlens.db
+      - key: REQUIRE_DEMO_AUTH
+        value: "true"
+      - key: DEMO_USERNAME
+        sync: false
+      - key: DEMO_PASSWORD
+        sync: false
+      - key: LIVE_COLLECTORS_ENABLED
+        value: "true"
