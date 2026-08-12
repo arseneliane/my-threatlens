@@ -18,6 +18,14 @@ services:
         sync: false
       - key: DEMO_PASSWORD
         sync: false
+      - key: ZOHO_CLIENT_ID
+        sync: false
+      - key: ZOHO_CLIENT_SECRET
+        sync: false
+      - key: ZOHO_REFRESH_TOKEN
+        sync: false
+      - key: ZOHO_FROM_EMAIL
+        sync: false
       - key: LIVE_COLLECTORS_ENABLED
         value: "true"
       - key: REQUEST_TIMEOUT_SECONDS

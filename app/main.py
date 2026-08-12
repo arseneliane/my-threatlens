@@ -18,7 +18,7 @@ from .services.enrichment.core import extract_cves, severity, relevance
 from .services.imports.service import preview, sample_xlsx, sample_docx
 from .services.exports.excel import create_workbook
 from .services.chat import answer, ollama_answer
-from .services.email import send_findings_email
+from .services.email import send_findings_email, EmailDeliveryError
 
 ROOT=Path(__file__).parent
 app=FastAPI(title="My ThreatLens",version="1.0.0")
@@ -373,6 +373,7 @@ def email_findings(data:EmailIn,request:Request,db:Session=Depends(get_db)):
     rows=scoped_findings(db,setup,params)
     try: send_findings_email(settings,data.recipient,data.subject,data.message,rows,setup)
     except ValueError as exc: raise HTTPException(422,str(exc))
+    except EmailDeliveryError as exc: raise HTTPException(502,str(exc))
     except RuntimeError as exc: raise HTTPException(503,str(exc))
     except (OSError,smtplib.SMTPException): raise HTTPException(502,"The mail server could not send the message. Check the SMTP settings and try again.")
     return {"sent":True,"recipient":data.recipient,"findings_count":len(rows)}

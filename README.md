@@ -21,7 +21,7 @@ The application normalizes approved-source items, recognizes product and attack 
 - Server-side filters and pagination
 - Grounded per-finding assistant, notes, and checklist
 - Filter-consistent Excel export
-- SMTP email delivery with the filtered Excel report attached
+- Zoho Mail API or SMTP delivery with findings shown directly in the email
 
 ## 5. How It Works
 
@@ -33,7 +33,7 @@ Each browser receives an anonymous workspace cookie, so setup changes made on on
 
 ### Email setup
 
-Set `SMTP_HOST`, `SMTP_PORT`, `SMTP_FROM_EMAIL`, and, when required, `SMTP_USERNAME` and `SMTP_PASSWORD` in `.env`. Port 587 normally uses `SMTP_USE_TLS=true`; port 465 normally uses `SMTP_USE_SSL=true` and `SMTP_USE_TLS=false`. Restart the application after changing these values.
+For hosted delivery, configure `ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET`, `ZOHO_REFRESH_TOKEN`, and `ZOHO_FROM_EMAIL`; the application uses Zoho Mail's HTTPS API so it also works on hosts that block SMTP. Local or paid deployments can instead set `SMTP_HOST`, `SMTP_PORT`, `SMTP_FROM_EMAIL`, and any required SMTP credentials. Restart after changing these values.
 
 ## 7. How to Run
 

@@ -75,6 +75,35 @@ def test_html_email_contains_findings_without_excel_attachment():
     html=render_findings_html([finding],SimpleNamespace(name="Production"),"Security report")
     assert "Critical Windows flaw" in html and "CVE-2026-1234" in html and "Security report" in html
     assert "spreadsheet" not in html.lower()
+
+def test_zoho_https_email_delivery(monkeypatch):
+    from datetime import datetime,timezone
+    from app.services import email as email_service
+    sent={}
+    class Response:
+        def __init__(self,payload): self.payload=payload; self.is_success=True
+        def json(self): return self.payload
+    class Client:
+        def __init__(self,**kwargs): pass
+        def __enter__(self): return self
+        def __exit__(self,*args): pass
+        def get(self,url,headers):
+            assert url.endswith("/api/accounts") and headers["Authorization"].startswith("Zoho-oauthtoken ")
+            return Response({"data":[{"accountId":"12345","primaryEmailAddress":"mythreatlens@zohomail.com"}]})
+        def post(self,url,data=None,headers=None,json=None):
+            if url.endswith("/oauth/v2/token"):
+                assert data["grant_type"]=="refresh_token"
+                return Response({"access_token":"temporary-token","expires_in":3600})
+            sent.update(url=url,payload=json,headers=headers)
+            return Response({"status":{"code":200,"description":"success"}})
+    monkeypatch.setattr(email_service.httpx,"Client",Client)
+    email_service.ZOHO_TOKEN_CACHE.update(access_token="",expires_at=0.0,account_id="")
+    settings=SimpleNamespace(zoho_client_id="client",zoho_client_secret="secret",zoho_refresh_token="refresh",zoho_from_email="mythreatlens@zohomail.com",zoho_accounts_base_url="https://accounts.zoho.com",zoho_mail_base_url="https://mail.zoho.com")
+    finding=SimpleNamespace(severity="High",technology="Windows 11",title="Test finding",summary="Test summary",url="https://example.test",cves=["CVE-2026-1234"],source="Vendor",publication_date=datetime.now(timezone.utc))
+    email_service.send_findings_email(settings,"recipient@example.com","My ThreatLens test","Hello",[finding],SimpleNamespace(name="Default Setup"))
+    assert sent["url"].endswith("/api/accounts/12345/messages")
+    assert sent["payload"]["fromAddress"]=="mythreatlens@zohomail.com" and sent["payload"]["mailFormat"]=="html"
+    assert "Test finding" in sent["payload"]["content"]
 def test_selected_sources_have_real_collectors_except_cve_org():
     expected={"The Hacker News","BleepingComputer","SecurityWeek","CISA","Microsoft MSRC","Ubuntu Security Notices","Red Hat Security Advisories","Fortinet PSIRT","Cisco Security Advisories","Palo Alto Unit 42"}
     assert expected<=set(SOURCE_FEEDS)

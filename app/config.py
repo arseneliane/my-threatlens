@@ -23,6 +23,12 @@ class Settings(BaseSettings):
     smtp_from_email: str = ""
     smtp_use_tls: bool = True
     smtp_use_ssl: bool = False
+    zoho_client_id: str = ""
+    zoho_client_secret: str = ""
+    zoho_refresh_token: str = ""
+    zoho_from_email: str = ""
+    zoho_accounts_base_url: str = "https://accounts.zoho.com"
+    zoho_mail_base_url: str = "https://mail.zoho.com"
     ollama_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "qwen3:4b"
     ollama_timeout_seconds: int = 120
