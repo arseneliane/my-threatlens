@@ -6,6 +6,6 @@
 - `GET /api/findings` with `severity`, `technology`, `source`, `keyword`, `cve`, `review_state`, `ai_min`, `page`
 - `PUT /api/findings/{id}/review`
 - `POST/DELETE /api/findings/{id}/chat`
+- `GET/POST/DELETE /api/site-chat` for the active setup's site-wide DeepSeek conversation
 - `POST /api/import/preview`, `GET /api/import/sample/{xlsx|docx}`
 - `GET /api/export` with the same finding filters
-

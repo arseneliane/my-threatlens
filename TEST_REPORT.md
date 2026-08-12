@@ -3,7 +3,7 @@
 Verified on 2026-08-12 with Python 3.12:
 
 ```text
-37 passed, 3 warnings in 0.88s
+41 passed, 3 warnings in 1.00s
 ```
 
 The warnings are upstream deprecation notices for FastAPI's startup-event API and the TestClient/httpx compatibility layer; they do not represent test failures.
@@ -16,4 +16,4 @@ GET /about  200
 GET /api/setups  200 (Default Setup active)
 ```
 
-Live external collectors were intentionally not exercised during the automated suite; deterministic fixtures cover alias matching, source normalization, scan completion, filtered-export parity, hosted-demo authentication, browser-workspace isolation, setup-cache restoration, and Zoho HTTPS email delivery.
+Live external collectors were intentionally not exercised during the automated suite; deterministic fixtures cover alias matching, source normalization, scan completion, filtered-export parity, hosted-demo authentication, browser-workspace isolation, setup-cache restoration, Zoho HTTPS email delivery, and isolated site-wide/per-finding AI conversations.

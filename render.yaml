@@ -34,3 +34,9 @@ services:
         value: "60"
       - key: RESULTS_PAGE_SIZE
         value: "25"
+      - key: OLLAMA_URL
+        value: https://ollama.com
+      - key: OLLAMA_MODEL
+        value: deepseek-v4-flash:cloud
+      - key: OLLAMA_API_KEY
+        sync: false

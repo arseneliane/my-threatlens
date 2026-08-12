@@ -17,7 +17,7 @@ from .services.matching.engine import match_item
 from .services.enrichment.core import extract_cves, severity, relevance
 from .services.imports.service import preview, sample_xlsx, sample_docx
 from .services.exports.excel import create_workbook
-from .services.chat import answer, ollama_answer
+from .services.chat import answer, ollama_answer, ollama_site_answer
 from .services.email import send_findings_email, EmailDeliveryError
 
 ROOT=Path(__file__).parent
@@ -27,6 +27,7 @@ templates=Jinja2Templates(directory=ROOT/"templates")
 FINDINGS_CACHE={}
 SCANS_CACHE={}
 CHAT_CACHE={}
+SITE_CHAT_CACHE={}
 FINDING_IDS=itertools.count(1)
 SCAN_IDS=itertools.count(1)
 INSTANCE_ID=str(uuid.uuid4())
@@ -199,7 +200,7 @@ def startup():
     with SessionLocal() as db:
         # Remove legacy persisted operational data. Only saved setup configuration remains durable.
         db.execute(sql_delete(SourceStatus)); db.execute(sql_delete(ChatMessage)); db.execute(sql_delete(Finding)); db.execute(sql_delete(Scan))
-        FINDINGS_CACHE.clear(); SCANS_CACHE.clear(); CHAT_CACHE.clear()
+        FINDINGS_CACHE.clear(); SCANS_CACHE.clear(); CHAT_CACHE.clear(); SITE_CHAT_CACHE.clear()
         db.commit()
 
 @app.exception_handler(Exception)
@@ -346,8 +347,11 @@ def review(fid:int,data:ReviewIn,request:Request,db:Session=Depends(get_db)):
 async def chat(fid:int,data:ChatIn,request:Request,db:Session=Depends(get_db)):
     f=cached_finding(fid,db,request.state.client_id)
     if not f: raise HTTPException(404,"Finding not found.")
+    question=data.question.strip()
+    if not question: raise HTTPException(422,"Enter a question.")
+    if len(question)>2000: raise HTTPException(422,"The question must be 2,000 characters or fewer.")
     history=CHAT_CACHE.setdefault(fid,[])
-    pending=ChatMessage(finding_id=fid,role="user",content=data.question.strip(),created_at=datetime.now(timezone.utc))
+    pending=ChatMessage(finding_id=fid,role="user",content=question,created_at=datetime.now(timezone.utc))
     try: content=await ollama_answer(f,history+[pending],settings)
     except RuntimeError as exc: raise HTTPException(503,str(exc))
     reply=ChatMessage(finding_id=fid,role="assistant",content=content,created_at=datetime.now(timezone.utc)); history.extend([pending,reply])
@@ -361,6 +365,31 @@ def chat_history(fid:int,request:Request,db:Session=Depends(get_db)):
 def clear_chat(fid:int,request:Request,db:Session=Depends(get_db)):
     if not cached_finding(fid,db,request.state.client_id): raise HTTPException(404,"Finding not found.")
     CHAT_CACHE.pop(fid,None); return {"deleted":True}
+@app.post("/api/site-chat")
+async def site_chat(data:ChatIn,request:Request,db:Session=Depends(get_db)):
+    question=data.question.strip()
+    if not question: raise HTTPException(422,"Enter a question.")
+    if len(question)>2000: raise HTTPException(422,"The question must be 2,000 characters or fewer.")
+    setup=ensure_workspace(db,request.state.client_id)
+    params={k:v for k,v in request.query_params.items() if k!="page"}
+    rows=scoped_findings(db,setup,params)
+    cache_key=(request.state.client_id,setup.id)
+    history=SITE_CHAT_CACHE.setdefault(cache_key,[])
+    pending={"role":"user","content":question,"created_at":datetime.now(timezone.utc).isoformat()}
+    try: content=await ollama_site_answer(setup,rows,history+[pending],settings)
+    except RuntimeError as exc: raise HTTPException(503,str(exc))
+    reply={"role":"assistant","content":content,"created_at":datetime.now(timezone.utc).isoformat()}
+    history.extend([pending,reply])
+    if len(history)>40: del history[:-40]
+    return {"message":reply,"model":settings.ollama_model,"context_findings":len(rows)}
+@app.get("/api/site-chat")
+def site_chat_history(request:Request,db:Session=Depends(get_db)):
+    setup=ensure_workspace(db,request.state.client_id)
+    return {"messages":SITE_CHAT_CACHE.get((request.state.client_id,setup.id),[]),"model":settings.ollama_model}
+@app.delete("/api/site-chat")
+def clear_site_chat(request:Request,db:Session=Depends(get_db)):
+    setup=ensure_workspace(db,request.state.client_id)
+    SITE_CHAT_CACHE.pop((request.state.client_id,setup.id),None); return {"deleted":True}
 @app.get("/api/export")
 def export(request:Request,db:Session=Depends(get_db)):
     setup=ensure_workspace(db,request.state.client_id); params=dict(request.query_params); rows=scoped_findings(db,setup,params)

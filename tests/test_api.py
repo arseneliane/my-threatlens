@@ -22,10 +22,14 @@ def test_home_active_name(client):
     assert "function saveChecklist(id)" in js.text and "Save Review" not in js.text
     assert "function detailCves(cves)" in js.text and "Show ${links.length-8} more CVEs" in js.text
     assert "function renderFindingChat(messages)" in js.text and "async function loadFindingChat(id)" in js.text
+    site_chat_js=client.get("/static/site-chat.js")
+    assert 'id="siteChatLauncher"' in r.text and "function toggleSiteChat(open)" in site_chat_js.text
+    assert client.get("/static/site-chat.css").status_code==200
     assert 'value==="undefined"' in js.text
     assert 'id="pagination" class="pagination" hidden' in r.text
     assert '$("#pagination").hidden=j.pages<=1' in js.text
     about=client.get("/about"); assert about.status_code==200 and 'id="appSidebar"' in about.text
+    assert 'id="siteChatLauncher"' in about.text and '/static/site-chat.js' in about.text
     assert "/?open=setups" in about.text and "/?open=import" in about.text
     assert "How to use the website" in about.text and "Define your scope" in about.text
     assert "AI-assisted summaries" in about.text and "independent workspace" in about.text
@@ -189,6 +193,25 @@ def test_chat_grounded(client,monkeypatch):
         assert a["message"]["content"]=="Grounded local-model response"
         history=client.get(f'/api/findings/{findings[0]["id"]}/chat').json()["messages"]
         assert [message["role"] for message in history[-2:]]==["user","assistant"]
+
+def test_site_chat_uses_workspace_context(client,monkeypatch):
+    captured={}
+    async def fake_site_ollama(setup,findings,history,settings):
+        captured.update(setup=setup.display_name,findings=len(findings),question=history[-1]["content"],model=settings.ollama_model)
+        return "Workspace-level DeepSeek response"
+    monkeypatch.setattr("app.main.ollama_site_answer",fake_site_ollama)
+    response=client.post("/api/site-chat",json={"question":"What should I prioritize?"})
+    assert response.status_code==200 and response.json()["message"]["content"]=="Workspace-level DeepSeek response"
+    assert captured["setup"] and captured["question"]=="What should I prioritize?"
+    assert captured["model"].startswith("deepseek")
+    history=client.get("/api/site-chat").json()["messages"]
+    assert [message["role"] for message in history]==["user","assistant"]
+    assert client.delete("/api/site-chat").json()["deleted"] is True
+    assert client.get("/api/site-chat").json()["messages"]==[]
+
+def test_site_chat_rejects_empty_or_oversized_questions(client):
+    assert client.post("/api/site-chat",json={"question":"   "}).status_code==422
+    assert client.post("/api/site-chat",json={"question":"x"*2001}).status_code==422
 
 def test_chat_does_not_claim_unrelated_platform_is_affected():
     from app.services.chat import answer
