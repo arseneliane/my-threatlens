@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     app_host: str = "127.0.0.1"
     app_port: int = 8001
     database_url: str = f"sqlite:///{(ROOT / 'data' / 'my_threatlens.db').as_posix()}"
-    scan_interval_seconds: int = 300
+    scan_interval_seconds: int = 1800
     request_timeout_seconds: int = 12
     max_results_per_source: int = 200
     results_page_size: int = 50

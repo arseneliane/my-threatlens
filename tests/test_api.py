@@ -14,6 +14,11 @@ def test_home_active_name(client):
     assert "active-pill" in js.text and client.get("/static/setups.css").status_code==200
     assert "function setScanVisual" in js.text and client.get("/static/scan.css").status_code==200
     assert "shield-shape" in r.text and "Click Scan Now" in r.text
+    assert "Autoscan every 30 min" in r.text and "window.scanIntervalSeconds" in r.text
+    assert "function updateAutoScanCountdown()" in js.text and "await startScan()" in js.text
+    assert 'id="zeroDayScanBtn"' in r.text and "Scan for Zero Days" in r.text
+    assert "function startZeroDayScan()" in js.text and "/api/scans/zero-days" in js.text
+    assert client.get("/static/zero-day.css").status_code==200
     assert "/static/my-threatlens-logo.png" in r.text
     assert client.get("/static/my-threatlens-logo.png").status_code==200
     assert 'id="appSidebar"' in r.text and "function toggleSidebar()" in js.text
@@ -49,6 +54,8 @@ def test_home_active_name(client):
     assert "scopeDirty=true" in js.text and "showPendingScopeState()" in js.text
     assert "Save the setup or run a scan" in js.text
     assert "Scanning selected sources for fresh findings" in js.text
+    assert "Your additions" in js.text and "function addCustomOption()" in js.text and "function removeCustomOption(value)" in js.text
+    assert 'class="manual-option-chip"' in js.text and client.get("/static/selector-custom.css").status_code==200
 
 def test_hosted_demo_authentication(client,monkeypatch):
     from app.config import settings
@@ -145,6 +152,25 @@ def test_scan_count_uses_selected_date_range(client):
     assert status["findings_count"]==visible==0
     assert "0 findings in selected date range" in status["message"]
     assert "collected total" in status["message"]
+
+def test_zero_day_addon_scans_independently_of_regular_keywords(client):
+    client.post("/api/setups",json={"name":"Zero-Day Watch","technologies":["Windows 11","Exchange Server"],"keywords":["SQL Injection"],"sources":["The Hacker News"],"date_range":"7d"})
+    scan=client.post("/api/scans/zero-days")
+    assert scan.status_code==202
+    scan_id=scan.json()["scan_id"]
+    for _ in range(30):
+        status=client.get(f"/api/scans/{scan_id}").json()
+        if status["status"]=="completed": break
+        time.sleep(.03)
+    assert status["status"]=="completed" and status["kind"]=="zero_day"
+    assert status["findings_count"]>=2
+    assert status["metrics"]["zero_day_mentions"]>=1
+    assert status["metrics"]["active_exploitation"]>=1
+    assert status["metrics"]["critical_priority"]>=1
+    assert status["metrics"]["sources_checked"]==1
+    findings=client.get("/api/findings").json()
+    assert findings["total"]==status["findings_count"]
+    assert all("SQL Injection" not in finding["matched_keywords"] for finding in findings["items"])
 def test_delete_setup_with_scan_history(client):
     data={"name":"Delete With History","technologies":["FortiGate"],"keywords":["Exploit"],"sources":["CISA"],"date_range":"7d"}
     setup=client.post("/api/setups",json=data).json()

@@ -32,6 +32,7 @@ FINDING_IDS=itertools.count(1)
 SCAN_IDS=itertools.count(1)
 INSTANCE_ID=str(uuid.uuid4())
 CLIENT_COOKIE="threatlens_client"
+ZERO_DAY_SCAN_KEYWORDS=["Zero-Day","Active Exploitation","Exploit","CISA KEV","Proof of Concept"]
 
 @app.middleware("http")
 async def protect_hosted_demo(request:Request,call_next):
@@ -153,13 +154,13 @@ def utc_publication_date(value):
 
 def scoped_findings(db,setup,params):
     """Filter the current in-memory scan. Findings are never persisted to SQLite."""
-    if not setup.technologies or not setup.keywords or not setup.sources: return []
+    if not setup.technologies or not setup.sources: return []
     technologies=set(setup.technologies); keywords=set(setup.keywords)
     requested_keyword=params.get("keyword"); requested_cve=(params.get("cve") or "").upper()
     rows=sorted(FINDINGS_CACHE.get(setup.id,[]),key=lambda f:utc_publication_date(f.publication_date),reverse=True)
     matching=[f for f in rows
             if technologies.intersection(f.matched_technologies or [f.technology])
-            and keywords.intersection(f.matched_keywords or [])
+            and (SCANS_CACHE.get(f.scan_id,{}).get("kind")=="zero_day" or keywords.intersection(f.matched_keywords or []))
             and f.source in setup.sources and publication_in_setup_range(f.publication_date,setup)
             and (not params.get("severity") or f.severity==params["severity"])
             and (not params.get("technology") or f.technology==params["technology"])
@@ -219,7 +220,7 @@ async def errors(request, exc):
 @app.get("/",response_class=HTMLResponse)
 def home(request:Request,db:Session=Depends(get_db)):
     active=ensure_workspace(db,request.state.client_id)
-    return templates.TemplateResponse(request,"index.html",{"active":active})
+    return templates.TemplateResponse(request,"index.html",{"active":active,"scan_interval_seconds":settings.scan_interval_seconds})
 @app.get("/healthz",include_in_schema=False)
 def healthz(): return {"status":"ok"}
 @app.get("/about",response_class=HTMLResponse)
@@ -244,7 +245,7 @@ def restore_workspace(data:WorkspaceRestore,request:Request,db:Session=Depends(g
     restored=[]
     for item,name in unique:
         values=item.model_dump(); values["name"]=internal_setup_name(owner,name)
-        setup=Setup(**values,display_name=name,owner_id=owner,active=name==data.active_name,next_scan_at=datetime.now(timezone.utc)+timedelta(seconds=300)); db.add(setup); restored.append(setup)
+        setup=Setup(**values,display_name=name,owner_id=owner,active=name==data.active_name,next_scan_at=datetime.now(timezone.utc)+timedelta(seconds=settings.scan_interval_seconds)); db.add(setup); restored.append(setup)
     if restored and not any(s.active for s in restored): restored[0].active=True
     db.commit()
     return {"instance_id":INSTANCE_ID,"active":serial_setup(next(s for s in restored if s.active)),"setups":[serial_setup(s) for s in restored]}
@@ -257,7 +258,7 @@ def create_setup(data:SetupIn,request:Request,db:Session=Depends(get_db)):
     owner=request.state.client_id
     ensure_workspace(db,owner)
     if db.scalar(select(Setup).where(Setup.owner_id==owner,Setup.display_name==data.name)): raise HTTPException(409,"A setup with this name already exists.")
-    db.execute(update(Setup).where(Setup.owner_id==owner).values(active=False)); values=data.model_dump(); values["name"]=internal_setup_name(owner,data.name); s=Setup(**values,display_name=data.name,owner_id=owner,active=True,next_scan_at=datetime.now(timezone.utc)+timedelta(seconds=300)); db.add(s); db.commit(); return serial_setup(s)
+    db.execute(update(Setup).where(Setup.owner_id==owner).values(active=False)); values=data.model_dump(); values["name"]=internal_setup_name(owner,data.name); s=Setup(**values,display_name=data.name,owner_id=owner,active=True,next_scan_at=datetime.now(timezone.utc)+timedelta(seconds=settings.scan_interval_seconds)); db.add(s); db.commit(); return serial_setup(s)
 @app.put("/api/setups/{sid}")
 def save_setup(sid:int,data:SetupIn,request:Request,db:Session=Depends(get_db)):
     owner=request.state.client_id; s=owned_setup(db,owner,sid)
@@ -277,7 +278,7 @@ def duplicate(sid:int,request:Request,db:Session=Depends(get_db)):
     if not s: raise HTTPException(404,"Setup not found.")
     name=f"{s.display_name} Copy"; n=1
     while db.scalar(select(Setup).where(Setup.owner_id==owner,Setup.display_name==name)): n+=1; name=f"{s.display_name} Copy {n}"
-    db.execute(update(Setup).where(Setup.owner_id==owner).values(active=False)); c=Setup(name=internal_setup_name(owner,name),display_name=name,owner_id=owner,description=s.description,technologies=s.technologies,keywords=s.keywords,sources=s.sources,date_range=s.date_range,active=True,next_scan_at=datetime.now(timezone.utc)+timedelta(seconds=300)); db.add(c); db.commit(); return serial_setup(c)
+    db.execute(update(Setup).where(Setup.owner_id==owner).values(active=False)); c=Setup(name=internal_setup_name(owner,name),display_name=name,owner_id=owner,description=s.description,technologies=s.technologies,keywords=s.keywords,sources=s.sources,date_range=s.date_range,active=True,next_scan_at=datetime.now(timezone.utc)+timedelta(seconds=settings.scan_interval_seconds)); db.add(c); db.commit(); return serial_setup(c)
 @app.delete("/api/setups/{sid}")
 def delete(sid:int,request:Request,db:Session=Depends(get_db)):
     owner=request.state.client_id; s=owned_setup(db,owner,sid)
@@ -299,19 +300,20 @@ def delete(sid:int,request:Request,db:Session=Depends(get_db)):
 async def run_scan(scan_id):
     scan=SCANS_CACHE.get(scan_id)
     if not scan: return
+    zero_day_mode=scan.get("kind")=="zero_day"
     with SessionLocal() as db:
         setup=db.get(Setup,scan["setup_id"]); sources=list(setup.sources); scan_days=int(setup.date_range[:-1]) if setup.date_range.endswith("d") and setup.date_range[:-1].isdigit() else 120
-        scan.update(status="running",progress=5,message="Collecting approved sources")
+        scan.update(status="running",progress=5,message="Collecting zero-day intelligence" if zero_day_mode else "Collecting approved sources")
     collected=await asyncio.gather(*(collect_source(source,settings.request_timeout_seconds,settings.max_results_per_source,settings.live_collectors_enabled,scan_days) for source in sources))
     with SessionLocal() as db:
-        setup=db.get(Setup,scan["setup_id"]); results=[]; added=0; added_in_range=0; scan_now=datetime.now(timezone.utc); live_sources=0; seen_fingerprints=set(); source_states=[]
+        setup=db.get(Setup,scan["setup_id"]); results=[]; added=0; added_in_range=0; scan_now=datetime.now(timezone.utc); live_sources=0; seen_fingerprints=set(); source_states=[]; zero_day_mentions=0; active_exploitation=0; critical_priority=0
         for finding in FINDINGS_CACHE.get(setup.id,[]): CHAT_CACHE.pop(finding.id,None)
         for idx,(source,(raw_items,collector_mode)) in enumerate(zip(sources,collected)):
             scan["message"]=f"Processing {source} ({collector_mode})"
             is_live=collector_mode.startswith("live"); live_sources+=int(is_live)
             source_states.append({"source":source,"status":"live" if is_live else ("fallback" if raw_items else "unavailable"),"reason":f"{len(raw_items)} items collected; {collector_mode}"})
             for raw in raw_items:
-                text=raw["title"]+" "+raw["summary"]; m=match_item(text,setup.technologies,setup.keywords)
+                text=raw["title"]+" "+raw["summary"]; m=match_item(text,setup.technologies,ZERO_DAY_SCAN_KEYWORDS if zero_day_mode else setup.keywords)
                 if not m["relevant"]: continue
                 cves=extract_cves(text); sev,basis=severity(cvss=raw.get("cvss"),vendor=raw.get("vendor_severity"),kev=raw.get("kev",False),text=text); score,conf,reason=relevance(m["technology_score"],m["keyword_score"],raw.get("cvss"),raw.get("kev",False),text)
                 fp=hashlib.sha256(f'{raw["url"]}|{raw["title"]}|{raw["publication_date"].date()}'.encode()).hexdigest()
@@ -319,10 +321,17 @@ async def run_scan(scan_id):
                 seen_fingerprints.add(fp)
                 finding=Finding(id=next(FINDING_IDS),setup_id=setup.id,scan_id=scan_id,fingerprint=fp,title=raw["title"],summary=raw["summary"],url=raw["url"],source=source,publication_date=raw["publication_date"],technology=m["technologies"][0],matched_technologies=m["technologies"],matched_keywords=m["keywords"],cves=cves,severity=sev,severity_basis=basis,cvss=raw.get("cvss"),epss=None,kev=raw.get("kev",False),ai_score=score,ai_confidence=conf,ai_reason=reason,evidence=m["evidence"],review_state="Open",notes="",checklist={})
                 results.append(finding); added+=1
-                if publication_in_setup_range(raw["publication_date"],setup,scan_now): added_in_range+=1
+                if publication_in_setup_range(raw["publication_date"],setup,scan_now):
+                    added_in_range+=1
+                    if zero_day_mode:
+                        zero_day_mentions+=int(bool(re.search(r"\b(?:zero[- ]day|0-day)\b",text,re.I)))
+                        active_exploitation+=int(bool(raw.get("kev",False) or re.search(r"\b(?:actively exploited|active exploitation|under active (?:attack|exploitation)|exploited in the wild)\b",text,re.I)))
+                        critical_priority+=int(sev=="Critical")
             scan["progress"]=min(95,10+int((idx+1)/max(len(sources),1)*80))
-        FINDINGS_CACHE[setup.id]=results; scan.update(status="completed",progress=100,findings_count=added_in_range,sources=source_states)
+        metrics={"zero_day_mentions":zero_day_mentions,"active_exploitation":active_exploitation,"critical_priority":critical_priority,"sources_checked":len(sources),"live_sources":live_sources} if zero_day_mode else {}
+        FINDINGS_CACHE[setup.id]=results; scan.update(status="completed",progress=100,findings_count=added_in_range,sources=source_states,metrics=metrics)
         scan["message"]=f"Completed — {added_in_range} findings in selected date range"
+        if zero_day_mode: scan["message"]=f"Zero-day watch completed: {added_in_range} priority signals"
         if added!=added_in_range: scan["message"]+=f" ({added} collected total)"
         scan["message"]+=f" · {live_sources}/{len(sources)} sources live"
         setup.last_scan_at=datetime.now(timezone.utc); db.commit()
@@ -334,13 +343,22 @@ async def start_scan(request:Request,bg:BackgroundTasks,db:Session=Depends(get_d
     if running: raise HTTPException(409,"A scan is already running for this setup.")
     # Each scan is a fresh search; do not serve findings from the previous scope.
     for finding in FINDINGS_CACHE.pop(setup.id,[]): CHAT_CACHE.pop(finding.id,None)
-    start=datetime.now(timezone.utc); setup.next_scan_at=start+timedelta(seconds=300); scan_id=next(SCAN_IDS); SCANS_CACHE[scan_id]={"id":scan_id,"setup_id":setup.id,"status":"queued","progress":0,"message":"Queued","findings_count":0,"sources":[]}; db.commit(); bg.add_task(run_scan,scan_id)
+    start=datetime.now(timezone.utc); setup.next_scan_at=start+timedelta(seconds=settings.scan_interval_seconds); scan_id=next(SCAN_IDS); SCANS_CACHE[scan_id]={"id":scan_id,"setup_id":setup.id,"kind":"standard","status":"queued","progress":0,"message":"Queued","findings_count":0,"sources":[],"metrics":{}}; db.commit(); bg.add_task(run_scan,scan_id)
+    return {"scan_id":scan_id,"status":"queued","next_scan_at":setup.next_scan_at}
+@app.post("/api/scans/zero-days",status_code=202)
+async def start_zero_day_scan(request:Request,bg:BackgroundTasks,db:Session=Depends(get_db)):
+    setup=ensure_workspace(db,request.state.client_id)
+    if not setup.technologies or not setup.sources: raise HTTPException(400,"Choose at least one technology and one source before scanning for zero-days.")
+    running=next((scan for scan in SCANS_CACHE.values() if scan["setup_id"]==setup.id and scan["status"] in ("queued","running")),None)
+    if running: raise HTTPException(409,"A scan is already running for this setup.")
+    for finding in FINDINGS_CACHE.pop(setup.id,[]): CHAT_CACHE.pop(finding.id,None)
+    start=datetime.now(timezone.utc); setup.next_scan_at=start+timedelta(seconds=settings.scan_interval_seconds); scan_id=next(SCAN_IDS); SCANS_CACHE[scan_id]={"id":scan_id,"setup_id":setup.id,"kind":"zero_day","status":"queued","progress":0,"message":"Zero-day watch queued","findings_count":0,"sources":[],"metrics":{"zero_day_mentions":0,"active_exploitation":0,"critical_priority":0,"sources_checked":0,"live_sources":0}}; db.commit(); bg.add_task(run_scan,scan_id)
     return {"scan_id":scan_id,"status":"queued","next_scan_at":setup.next_scan_at}
 @app.get("/api/scans/{scan_id}")
 def scan_status(scan_id:int,request:Request,db:Session=Depends(get_db)):
     s=SCANS_CACHE.get(scan_id)
     if not s or not owned_setup(db,request.state.client_id,s["setup_id"]): raise HTTPException(404,"Scan not found.")
-    return {k:s[k] for k in ("id","status","progress","message","findings_count","sources")}
+    return {k:s.get(k) for k in ("id","kind","status","progress","message","findings_count","sources","metrics")}
 @app.get("/api/findings")
 def findings(request:Request,page:int=1,page_size:int=settings.results_page_size,db:Session=Depends(get_db)):
     setup=ensure_workspace(db,request.state.client_id); params=dict(request.query_params)

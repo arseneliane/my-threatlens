@@ -1,0 +1,105 @@
+.scan-actions-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, .55fr);
+  gap: 18px;
+  margin: 22px 0;
+}
+
+.scan-actions-grid .scanbar {
+  margin: 0;
+}
+
+.zero-day-button {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 16px;
+  min-height: 150px;
+  overflow: hidden;
+  padding: 24px 26px;
+  border: 0;
+  border-radius: 12px;
+  background: linear-gradient(90deg, #8f1d14 var(--zero-day-progress), transparent var(--zero-day-progress)), linear-gradient(125deg, #b42318, #dc6803);
+  box-shadow: 0 10px 26px #b4231838;
+  color: #fff;
+  text-align: left;
+  transition: transform .2s ease, box-shadow .2s ease;
+}
+
+.zero-day-button::after {
+  position: absolute;
+  top: -65px;
+  right: -45px;
+  width: 190px;
+  height: 190px;
+  border: 1px solid #ffffff28;
+  border-radius: 50%;
+  box-shadow: 0 0 0 28px #ffffff0a, 0 0 0 56px #ffffff08;
+  content: "";
+}
+
+.zero-day-button:hover:not(:disabled) {
+  transform: translateY(-3px);
+  box-shadow: 0 14px 32px #b423184d;
+}
+
+.zero-day-button.scanning {
+  animation: zero-day-pulse 1.2s ease-in-out infinite;
+}
+
+.zero-day-icon {
+  display: grid;
+  place-items: center;
+  width: 58px;
+  height: 58px;
+  border: 1px solid #ffffff66;
+  border-radius: 50%;
+  background: #ffffff18;
+  font-size: 28px;
+}
+
+.zero-day-copy {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 5px;
+}
+
+.zero-day-copy strong {
+  font-size: clamp(20px, 2vw, 27px);
+  line-height: 1.1;
+}
+
+.zero-day-copy small {
+  max-width: 310px;
+  color: #ffeee5;
+  font-size: 11px;
+}
+
+.zero-day-percent {
+  position: relative;
+  z-index: 1;
+  align-self: end;
+  color: #ffe7d6;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+@keyframes zero-day-pulse {
+  50% { box-shadow: 0 12px 34px #dc680375; }
+}
+
+@media (max-width: 1100px) {
+  .scan-actions-grid { grid-template-columns: 1fr; }
+  .zero-day-button { min-height: 115px; }
+}
+
+@media (max-width: 600px) {
+  .zero-day-button { grid-template-columns: auto 1fr; padding: 20px; }
+  .zero-day-percent { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zero-day-button { animation: none !important; transition: none; }
+}

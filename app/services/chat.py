@@ -149,6 +149,7 @@ SITE CAPABILITIES
 - Setups define technologies, security keywords, public intelligence sources, and a date range.
 - Scan Now collects matching public-source items. A result must match both a selected technology and a selected keyword.
 - Findings can be filtered, reviewed, exported to Excel, or emailed as a concise brief.
+- Scan for Zero Days performs a focused published-intelligence scan and reports zero-day mentions, active exploitation, critical-priority matches, and sources checked. It does not scan devices for unknown vulnerabilities.
 - Opening Review provides finding details, a direct email action, and a separate finding-specific AI conversation.
 - Setup configuration is backed up in this browser. Findings, scans, reviews, and chats are temporary.
 
