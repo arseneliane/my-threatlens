@@ -37,3 +37,40 @@ tr.selected-finding td {
 .tablewrap table {
   min-width: 1120px;
 }
+
+.email-form {
+  display: grid;
+  gap: 14px;
+  padding: 18px 20px 0;
+}
+
+.email-form label {
+  display: grid;
+  gap: 7px;
+  color: #526b7a;
+  font-weight: 700;
+}
+
+.email-form label input,
+.email-form label select,
+.email-form label textarea {
+  width: 100%;
+  color: #17364a;
+  font: inherit;
+}
+
+.email-form label textarea {
+  resize: vertical;
+  min-height: 86px;
+  padding: 10px 11px;
+  border: 1px solid #b9cad5;
+  border-radius: 7px;
+}
+
+.email-edit-hint {
+  color: var(--muted);
+}
+
+.email-form .modalfoot {
+  margin: 0 -20px;
+}

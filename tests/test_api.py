@@ -31,7 +31,10 @@ def test_home_active_name(client):
     assert 'id="biggestThreat"' in r.text and "function renderBiggestThreat(f)" in js.text
     assert "Email this threat" in js.text and "openSingleEmail" in js.text
     assert 'id="emailSelected"' in r.text and "openSelectedEmail" in js.text
+    assert 'id="emailAll"' in r.text and "openAllEmail" in js.text
     assert 'class="finding-select"' in js.text and "finding_ids" in js.text
+    assert 'id="emailSubjectPreset"' in r.text and 'id="emailMessagePreset"' in r.text
+    assert "Kindly check it now" in r.text and "applyEmailMessagePreset" in js.text
     assert client.get("/static/finding-email.css").status_code==200
     assert client.get("/static/biggest-threat.css").status_code==200
     about=client.get("/about"); assert about.status_code==200 and 'id="appSidebar"' in about.text
@@ -118,6 +121,9 @@ def test_scan_202_completion_filters_export(client,monkeypatch):
     selected=client.post("/api/email",json={"recipient":"supervisor@example.com","subject":"Selected threats","message":"Review these threats.","finding_ids":selected_ids})
     assert selected.status_code==200 and selected.json()["findings_count"]==2
     assert [finding.id for finding in sent["rows"]]==selected_ids
+    all_critical=client.post("/api/email?severity=Critical",json={"recipient":"supervisor@example.com","subject":"All critical threats","message":"Kindly check it now."})
+    assert all_critical.status_code==200 and all_critical.json()["findings_count"]==result["total"]
+    assert len(sent["rows"])==result["total"] and all(finding.severity=="Critical" for finding in sent["rows"])
     if result["items"]: assert result["items"][0]["ai_summary"] and result["items"][0]["ai_reason"]
     exp=client.get("/api/export?severity=Critical"); wb=load_workbook(BytesIO(exp.content))
     import re
