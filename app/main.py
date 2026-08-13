@@ -76,6 +76,7 @@ class EmailIn(BaseModel):
     recipient:str
     subject:str="My ThreatLens findings report"
     message:str="Attached is the requested My ThreatLens findings report."
+    finding_ids:list[int]=[]
 
 class WorkspaceRestore(BaseModel):
     setups:list[SetupIn]
@@ -407,7 +408,15 @@ def export(request:Request,db:Session=Depends(get_db)):
 @app.post("/api/email")
 def email_findings(data:EmailIn,request:Request,finding_id:int|None=None,db:Session=Depends(get_db)):
     setup=ensure_workspace(db,request.state.client_id); params={k:v for k,v in request.query_params.items() if k!="page"}
-    if finding_id is not None:
+    if data.finding_ids:
+        finding_ids=list(dict.fromkeys(data.finding_ids))
+        if len(finding_ids)>50: raise HTTPException(422,"Select no more than 50 threats per email.")
+        rows=[]
+        for selected_id in finding_ids:
+            finding=cached_finding(selected_id,db,request.state.client_id)
+            if not finding or finding.setup_id!=setup.id: raise HTTPException(404,"One or more selected threats were not found.")
+            rows.append(finding)
+    elif finding_id is not None:
         finding=cached_finding(finding_id,db,request.state.client_id)
         if not finding or finding.setup_id!=setup.id: raise HTTPException(404,"Finding not found.")
         rows=[finding]

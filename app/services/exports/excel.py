@@ -9,17 +9,16 @@ def safe(v):
     return "'"+s if s.startswith(("=","+","-","@")) else s
 def create_workbook(findings, setup, filters):
     wb=Workbook(); ws=wb.active; ws.title="Results"
-    heads=["Severity","Technology","Finding","Summary","Publication Date","CVEs (max 5)","Source","Source URL","AI Relevance","AI Confidence","Review Progress"]
-    ws.append(heads); ws.freeze_panes="A2"; ws.auto_filter.ref="A1:K1"
+    heads=["Severity","Technology","Finding","Summary","Publication Date","CVEs (max 5)","Source","Source URL","AI Relevance","AI Confidence"]
+    ws.append(heads); ws.freeze_panes="A2"; ws.auto_filter.ref="A1:J1"
     colors={"Critical":"D92D20","High":"F79009","Medium":"FEC84B","Low":"12B76A","Unknown":"667085"}
     for i,f in enumerate(findings,2):
-        done=sum(bool(v) for v in (f.checklist or {}).values())
-        ws.append([f.severity,f.technology,safe(f.title),safe(f.summary),f.publication_date.replace(tzinfo=None),", ".join(f.cves[:5]),f.source,f.url,f"{f.ai_score}/100",f.ai_confidence,f"{done}/11 complete"])
+        ws.append([f.severity,f.technology,safe(f.title),safe(f.summary),f.publication_date.replace(tzinfo=None),", ".join(f.cves[:5]),f.source,f.url,f"{f.ai_score}/100",f.ai_confidence])
         ws.cell(i,1).fill=PatternFill("solid",fgColor=colors.get(f.severity,"667085")); ws.cell(i,1).font=Font(color="FFFFFF",bold=True)
         ws.cell(i,3).hyperlink=f.url; ws.cell(i,8).hyperlink=f.url
         if i%2==0:
-            for c in range(2,12): ws.cell(i,c).fill=PatternFill("solid",fgColor="F4F8FB")
-    widths=[12,22,45,55,20,34,24,45,15,15,18]
+            for c in range(2,11): ws.cell(i,c).fill=PatternFill("solid",fgColor="F4F8FB")
+    widths=[12,22,45,55,20,34,24,45,15,15]
     for n,w in enumerate(widths,1): ws.column_dimensions[get_column_letter(n)].width=w
     for row in ws.iter_rows():
         for cell in row: cell.alignment=Alignment(vertical="top",wrap_text=True)
@@ -30,11 +29,9 @@ def create_workbook(findings, setup, filters):
     for r in rows: ctx.append(r)
     details=wb.create_sheet("Finding Details"); details.append(["Finding","CVSS","EPSS","KEV","Severity basis","AI reason","Evidence links","Notes"])
     extra=wb.create_sheet("Additional CVEs"); extra.append(["Finding","Additional CVE"])
-    checks=wb.create_sheet("Review Checklist"); checks.append(["Finding","Checklist Item","Complete"])
     for f in findings:
         details.append([safe(f.title),f.cvss,f.epss,"Yes" if f.kev else "No",f.severity_basis,f.ai_reason,"\n".join(f.evidence),safe(f.notes)])
         for c in f.cves[5:]: extra.append([safe(f.title),c])
-        for k,v in (f.checklist or {}).items(): checks.append([safe(f.title),k,"Yes" if v else "No"])
     for sheet in wb:
         sheet.freeze_panes="A2"
         for cell in sheet[1]: cell.font=Font(bold=True,color="FFFFFF"); cell.fill=PatternFill("solid",fgColor="075985")

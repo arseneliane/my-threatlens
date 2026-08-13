@@ -19,7 +19,7 @@ def test_home_active_name(client):
     assert 'id="appSidebar"' in r.text and "function toggleSidebar()" in js.text
     assert client.get("/static/sidebar.css").status_code==200
     assert client.get("/static/review.css").status_code==200
-    assert "function saveChecklist(id)" in js.text and "Save Review" not in js.text
+    assert "Checklist" not in js.text and "function saveChecklist(id)" not in js.text
     assert "function detailCves(cves)" in js.text and "Show ${links.length-8} more CVEs" in js.text
     assert "function renderFindingChat(messages)" in js.text and "async function loadFindingChat(id)" in js.text
     site_chat_js=client.get("/static/site-chat.js")
@@ -29,7 +29,10 @@ def test_home_active_name(client):
     assert 'id="pagination" class="pagination" hidden' in r.text
     assert '$("#pagination").hidden=j.pages<=1' in js.text
     assert 'id="biggestThreat"' in r.text and "function renderBiggestThreat(f)" in js.text
-    assert "Email this threat" in js.text and "finding_id" in js.text
+    assert "Email this threat" in js.text and "openSingleEmail" in js.text
+    assert 'id="emailSelected"' in r.text and "openSelectedEmail" in js.text
+    assert 'class="finding-select"' in js.text and "finding_ids" in js.text
+    assert client.get("/static/finding-email.css").status_code==200
     assert client.get("/static/biggest-threat.css").status_code==200
     about=client.get("/about"); assert about.status_code==200 and 'id="appSidebar"' in about.text
     assert 'id="siteChatLauncher"' in about.text and '/static/site-chat.js' in about.text
@@ -109,11 +112,18 @@ def test_scan_202_completion_filters_export(client,monkeypatch):
     emailed=client.post(f'/api/email?finding_id={result["biggest"]["id"]}',json={"recipient":"supervisor@example.com","subject":"Biggest threat","message":"Review this threat."})
     assert emailed.status_code==200 and emailed.json()["findings_count"]==1
     assert len(sent["rows"])==1 and sent["rows"][0].id==result["biggest"]["id"]
+    available=client.get("/api/findings").json()["items"]
+    selected_ids=[finding["id"] for finding in available[:2]]
+    assert len(selected_ids)==2
+    selected=client.post("/api/email",json={"recipient":"supervisor@example.com","subject":"Selected threats","message":"Review these threats.","finding_ids":selected_ids})
+    assert selected.status_code==200 and selected.json()["findings_count"]==2
+    assert [finding.id for finding in sent["rows"]]==selected_ids
     if result["items"]: assert result["items"][0]["ai_summary"] and result["items"][0]["ai_reason"]
     exp=client.get("/api/export?severity=Critical"); wb=load_workbook(BytesIO(exp.content))
     import re
     assert re.search(r'My-ThreatLens-Results-\d{8}-\d{6}\.xlsx',exp.headers["content-disposition"])
-    assert set(["Results","Export Context","Finding Details","Additional CVEs","Review Checklist"])<=set(wb.sheetnames)
+    assert set(["Results","Export Context","Finding Details","Additional CVEs"])<=set(wb.sheetnames)
+    assert "Review Checklist" not in wb.sheetnames and "Review Progress" not in [cell.value for cell in wb["Results"][1]]
     assert wb["Results"].max_row-1==result["total"]
 
 def test_scan_count_uses_selected_date_range(client):

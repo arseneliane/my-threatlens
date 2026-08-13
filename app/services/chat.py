@@ -149,7 +149,7 @@ SITE CAPABILITIES
 - Setups define technologies, security keywords, public intelligence sources, and a date range.
 - Scan Now collects matching public-source items. A result must match both a selected technology and a selected keyword.
 - Findings can be filtered, reviewed, exported to Excel, or emailed as a concise brief.
-- Opening Review provides finding details, a checklist, and a separate finding-specific AI conversation.
+- Opening Review provides finding details, a direct email action, and a separate finding-specific AI conversation.
 - Setup configuration is backed up in this browser. Findings, scans, reviews, and chats are temporary.
 
 SAFETY AND ACCURACY RULES

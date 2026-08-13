@@ -50,7 +50,7 @@ Open http://127.0.0.1:8001.
 
 ## 8. Typical Analyst Workflow
 
-Choose scope, save the setup, scan, filter findings, open a review, verify vendor evidence, record notes and checklist progress, and export the current filtered set.
+Choose scope, save the setup, scan, filter findings, open a review, verify vendor evidence, email one or several selected threats, and export the current filtered set.
 
 ### Ollama assistants
 

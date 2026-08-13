@@ -1,0 +1,39 @@
+.finding-toolbar-actions,
+.finding-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.finding-actions {
+  align-items: stretch;
+  flex-direction: column;
+}
+
+.email-threat {
+  color: var(--blue);
+  border-color: #8db6ca;
+}
+
+.select-column {
+  width: 42px;
+  text-align: center;
+}
+
+.select-column input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--blue);
+}
+
+tr.selected-finding td {
+  background: #edf8fb;
+}
+
+.review-email {
+  margin: 4px 0 2px;
+}
+
+.tablewrap table {
+  min-width: 1120px;
+}

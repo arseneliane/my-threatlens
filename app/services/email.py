@@ -17,15 +17,14 @@ def render_findings_html(findings,setup,intro=""):
     counts=Counter(f.severity for f in findings)
     count_text=" · ".join(f"{escape(level)} {counts[level]}" for level in ("Critical","High","Medium","Low","Unknown") if counts[level]) or "No matching findings"
     cards=[]
-    for f in findings[:20]:
+    for f in findings:
         cves=", ".join(f.cves or []) or "No CVE"; published=f.publication_date.strftime("%Y-%m-%d")
         cards.append(f'''<div style="padding:14px 0;border-bottom:1px solid #e4edf2"><div style="margin-bottom:7px"><span style="display:inline-block;background:{SEVERITY_COLORS.get(f.severity,'#667085')};color:#fff;padding:3px 8px;border-radius:999px;font-size:12px;font-weight:700">{escape(f.severity)}</span> <span style="color:#526b7a;font-size:12px">{escape(f.technology)}</span></div><a style="color:#075985;font-size:15px;font-weight:700;text-decoration:none" href="{escape(f.url,quote=True)}">{escape(f.title)}</a><div style="color:#64748b;font-size:12px;margin-top:6px">{escape(cves)} · {escape(f.source)} · {published}</div></div>''')
     findings_html="".join(cards) if cards else '<div style="padding:24px 0;text-align:center;color:#64748b">No findings matched the current filters.</div>'
-    remaining=max(0,len(findings)-len(cards))
-    more=f'<p style="margin:18px 0 0;color:#526b7a"><strong>{remaining} additional findings</strong> are not shown here. Use Excel Export for the complete filtered list.</p>' if remaining else ""
     setup_name=getattr(setup,"display_name",setup.name)
     intro_html=f'<p style="margin:0 0 18px;color:#526b7a">{escape(intro.strip())}</p>' if intro.strip() else ""
-    return f'''<!doctype html><html><body style="margin:0;background:#f4f8fa;font:14px Arial,sans-serif;color:#183042"><div style="max-width:700px;margin:auto;background:#fff"><div style="padding:22px 24px;background:#075985;color:#fff"><h1 style="font-size:21px;margin:0 0 5px">My ThreatLens</h1><div>Security findings brief · {escape(setup_name)}</div></div><div style="padding:22px 24px">{intro_html}<div style="padding:12px 14px;background:#eef5f8;border-radius:8px"><strong>{len(findings)} filtered findings</strong><div style="color:#526b7a;font-size:12px;margin-top:4px">{count_text}</div></div><div>{findings_html}</div>{more}<p style="margin-top:22px;color:#64748b;font-size:11px">Verify each finding against its linked primary source and your organization's asset inventory.</p></div></div></body></html>'''
+    threat_label="threat" if len(findings)==1 else "threats"
+    return f'''<!doctype html><html><body style="margin:0;background:#f4f8fa;font:14px Arial,sans-serif;color:#183042"><div style="max-width:700px;margin:auto;background:#fff"><div style="padding:22px 24px;background:#075985;color:#fff"><h1 style="font-size:21px;margin:0 0 5px">My ThreatLens</h1><div>Security findings brief · {escape(setup_name)}</div></div><div style="padding:22px 24px">{intro_html}<div style="padding:12px 14px;background:#eef5f8;border-radius:8px"><strong>{len(findings)} selected {threat_label}</strong><div style="color:#526b7a;font-size:12px;margin-top:4px">{count_text}</div></div><div>{findings_html}</div><p style="margin-top:22px;color:#64748b;font-size:11px">Verify each finding against its linked primary source and your organization's asset inventory.</p></div></div></body></html>'''
 
 def zoho_configured(settings):
     return all((settings.zoho_client_id,settings.zoho_client_secret,settings.zoho_refresh_token,settings.zoho_from_email))
