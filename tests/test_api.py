@@ -18,10 +18,16 @@ def test_home_active_name(client):
     assert "function updateAutoScanCountdown()" in js.text and "await startScan()" in js.text
     assert 'id="zeroDayScanBtn"' in r.text and "Scan for Zero Days" in r.text
     assert "function startZeroDayScan()" in js.text and "/api/scans/zero-days" in js.text
+    assert 'id="zeroDayResults"' in r.text and "/api/zero-day-findings" in js.text
+    assert "function zeroDayRowHtml(f)" in js.text
     assert client.get("/static/zero-day.css").status_code==200
     assert "/static/my-threatlens-logo.png" in r.text
     assert client.get("/static/my-threatlens-logo.png").status_code==200
     assert 'id="appSidebar"' in r.text and "function toggleSidebar()" in js.text
+    assert 'id="autosaveLabel"' in r.text and "Saved automatically" in r.text
+    assert "function scheduleAutoSave()" in js.text and "function selectorDraftChanged()" in js.text
+    assert 'onchange="selectorDraftChanged()"' in js.text and "if(!await saveSetup(true))return" in js.text
+    assert "Selections save automatically." in r.text
     assert client.get("/static/sidebar.css").status_code==200
     assert client.get("/static/review.css").status_code==200
     assert "Checklist" not in js.text and "function saveChecklist(id)" not in js.text
@@ -52,7 +58,7 @@ def test_home_active_name(client):
     assert 'new URLSearchParams(location.search).get("open")' in js.text
     assert 'link.download=`My-ThreatLens-Results-${stamp}.xlsx`' in js.text
     assert "scopeDirty=true" in js.text and "showPendingScopeState()" in js.text
-    assert "Save the setup or run a scan" in js.text
+    assert "Saving setup changes. Findings will refresh automatically." in js.text
     assert "Scanning selected sources for fresh findings" in js.text
     assert "Your additions" in js.text and "function addCustomOption()" in js.text and "function removeCustomOption(value)" in js.text
     assert 'class="manual-option-chip"' in js.text and client.get("/static/selector-custom.css").status_code==200
@@ -168,9 +174,18 @@ def test_zero_day_addon_scans_independently_of_regular_keywords(client):
     assert status["metrics"]["active_exploitation"]>=1
     assert status["metrics"]["critical_priority"]>=1
     assert status["metrics"]["sources_checked"]==1
-    findings=client.get("/api/findings").json()
-    assert findings["total"]==status["findings_count"]
-    assert all("SQL Injection" not in finding["matched_keywords"] for finding in findings["items"])
+    normal_findings=client.get("/api/findings").json()
+    zero_day_findings=client.get("/api/zero-day-findings").json()
+    assert normal_findings["total"]==0
+    assert zero_day_findings["scanned"] is True and zero_day_findings["total"]==status["findings_count"]
+    assert all("SQL Injection" not in finding["matched_keywords"] for finding in zero_day_findings["items"])
+    normal_scan=client.post("/api/scans").json()
+    for _ in range(30):
+        normal_status=client.get(f'/api/scans/{normal_scan["scan_id"]}').json()
+        if normal_status["status"]=="completed": break
+        time.sleep(.03)
+    assert client.get("/api/findings").json()["total"]==0
+    assert client.get("/api/zero-day-findings").json()["total"]==zero_day_findings["total"]
 def test_delete_setup_with_scan_history(client):
     data={"name":"Delete With History","technologies":["FortiGate"],"keywords":["Exploit"],"sources":["CISA"],"date_range":"7d"}
     setup=client.post("/api/setups",json=data).json()

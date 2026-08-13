@@ -48,9 +48,28 @@
 }
 
 .app-sidebar nav .sidebar-save {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 11px 13px;
+  border-radius: 7px;
   background: var(--blue);
   color: #fff;
   box-shadow: 0 5px 12px #07598524;
+}
+
+.app-sidebar nav .autosave-status {
+  cursor: default;
+  font-size: 12px;
+}
+
+.app-sidebar nav .autosave-status.saving {
+  background: #b54708;
+}
+
+.app-sidebar nav .autosave-status.error {
+  background: #b42318;
 }
 
 .app-sidebar nav .sidebar-save:hover {

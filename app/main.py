@@ -25,6 +25,7 @@ app=FastAPI(title="My ThreatLens",version="1.0.0")
 app.mount("/static",StaticFiles(directory=ROOT/"static"),name="static")
 templates=Jinja2Templates(directory=ROOT/"templates")
 FINDINGS_CACHE={}
+ZERO_DAY_FINDINGS_CACHE={}
 SCANS_CACHE={}
 CHAT_CACHE={}
 SITE_CHAT_CACHE={}
@@ -160,7 +161,7 @@ def scoped_findings(db,setup,params):
     rows=sorted(FINDINGS_CACHE.get(setup.id,[]),key=lambda f:utc_publication_date(f.publication_date),reverse=True)
     matching=[f for f in rows
             if technologies.intersection(f.matched_technologies or [f.technology])
-            and (SCANS_CACHE.get(f.scan_id,{}).get("kind")=="zero_day" or keywords.intersection(f.matched_keywords or []))
+            and keywords.intersection(f.matched_keywords or [])
             and f.source in setup.sources and publication_in_setup_range(f.publication_date,setup)
             and (not params.get("severity") or f.severity==params["severity"])
             and (not params.get("technology") or f.technology==params["technology"])
@@ -181,8 +182,15 @@ def scoped_findings(db,setup,params):
         source_order=next_round
     return diversified
 
+def scoped_zero_day_findings(setup):
+    """Return the focused zero-day scan without mixing it into standard findings."""
+    if not setup.technologies or not setup.sources: return []
+    technologies=set(setup.technologies)
+    rows=sorted(ZERO_DAY_FINDINGS_CACHE.get(setup.id,[]),key=lambda f:utc_publication_date(f.publication_date),reverse=True)
+    return [f for f in rows if technologies.intersection(f.matched_technologies or [f.technology]) and f.source in setup.sources and publication_in_setup_range(f.publication_date,setup)]
+
 def cached_finding(fid,db=None,owner_id=None):
-    finding=next((finding for rows in FINDINGS_CACHE.values() for finding in rows if finding.id==fid),None)
+    finding=next((finding for cache in (FINDINGS_CACHE,ZERO_DAY_FINDINGS_CACHE) for rows in cache.values() for finding in rows if finding.id==fid),None)
     if finding and db and owner_id and not owned_setup(db,owner_id,finding.setup_id): return None
     return finding
 
@@ -209,7 +217,7 @@ def startup():
     with SessionLocal() as db:
         # Remove legacy persisted operational data. Only saved setup configuration remains durable.
         db.execute(sql_delete(SourceStatus)); db.execute(sql_delete(ChatMessage)); db.execute(sql_delete(Finding)); db.execute(sql_delete(Scan))
-        FINDINGS_CACHE.clear(); SCANS_CACHE.clear(); CHAT_CACHE.clear(); SITE_CHAT_CACHE.clear()
+        FINDINGS_CACHE.clear(); ZERO_DAY_FINDINGS_CACHE.clear(); SCANS_CACHE.clear(); CHAT_CACHE.clear(); SITE_CHAT_CACHE.clear()
         db.commit()
 
 @app.exception_handler(Exception)
@@ -239,7 +247,8 @@ def restore_workspace(data:WorkspaceRestore,request:Request,db:Session=Depends(g
         clean=item.name.strip()[:120] or "Untitled Setup"
         if clean not in names: names.add(clean); unique.append((item,clean))
     for setup in db.scalars(select(Setup).where(Setup.owner_id==owner)).all():
-        for finding in FINDINGS_CACHE.pop(setup.id,[]): CHAT_CACHE.pop(finding.id,None)
+        for cache in (FINDINGS_CACHE,ZERO_DAY_FINDINGS_CACHE):
+            for finding in cache.pop(setup.id,[]): CHAT_CACHE.pop(finding.id,None)
         db.delete(setup)
     db.flush()
     restored=[]
@@ -286,7 +295,8 @@ def delete(sid:int,request:Request,db:Session=Depends(get_db)):
     if db.scalar(select(func.count()).select_from(Setup).where(Setup.owner_id==owner))<=1:
         raise HTTPException(409,"The last setup cannot be deleted. Create another setup first.")
     was_active=s.active
-    for finding in FINDINGS_CACHE.pop(sid,[]): CHAT_CACHE.pop(finding.id,None)
+    for cache in (FINDINGS_CACHE,ZERO_DAY_FINDINGS_CACHE):
+        for finding in cache.pop(sid,[]): CHAT_CACHE.pop(finding.id,None)
     for scan_id,scan in list(SCANS_CACHE.items()):
         if scan["setup_id"]==sid: SCANS_CACHE.pop(scan_id,None)
     db.delete(s)
@@ -301,13 +311,14 @@ async def run_scan(scan_id):
     scan=SCANS_CACHE.get(scan_id)
     if not scan: return
     zero_day_mode=scan.get("kind")=="zero_day"
+    result_cache=ZERO_DAY_FINDINGS_CACHE if zero_day_mode else FINDINGS_CACHE
     with SessionLocal() as db:
         setup=db.get(Setup,scan["setup_id"]); sources=list(setup.sources); scan_days=int(setup.date_range[:-1]) if setup.date_range.endswith("d") and setup.date_range[:-1].isdigit() else 120
         scan.update(status="running",progress=5,message="Collecting zero-day intelligence" if zero_day_mode else "Collecting approved sources")
     collected=await asyncio.gather(*(collect_source(source,settings.request_timeout_seconds,settings.max_results_per_source,settings.live_collectors_enabled,scan_days) for source in sources))
     with SessionLocal() as db:
         setup=db.get(Setup,scan["setup_id"]); results=[]; added=0; added_in_range=0; scan_now=datetime.now(timezone.utc); live_sources=0; seen_fingerprints=set(); source_states=[]; zero_day_mentions=0; active_exploitation=0; critical_priority=0
-        for finding in FINDINGS_CACHE.get(setup.id,[]): CHAT_CACHE.pop(finding.id,None)
+        for finding in result_cache.get(setup.id,[]): CHAT_CACHE.pop(finding.id,None)
         for idx,(source,(raw_items,collector_mode)) in enumerate(zip(sources,collected)):
             scan["message"]=f"Processing {source} ({collector_mode})"
             is_live=collector_mode.startswith("live"); live_sources+=int(is_live)
@@ -329,7 +340,7 @@ async def run_scan(scan_id):
                         critical_priority+=int(sev=="Critical")
             scan["progress"]=min(95,10+int((idx+1)/max(len(sources),1)*80))
         metrics={"zero_day_mentions":zero_day_mentions,"active_exploitation":active_exploitation,"critical_priority":critical_priority,"sources_checked":len(sources),"live_sources":live_sources} if zero_day_mode else {}
-        FINDINGS_CACHE[setup.id]=results; scan.update(status="completed",progress=100,findings_count=added_in_range,sources=source_states,metrics=metrics)
+        result_cache[setup.id]=results; scan.update(status="completed",progress=100,findings_count=added_in_range,sources=source_states,metrics=metrics)
         scan["message"]=f"Completed — {added_in_range} findings in selected date range"
         if zero_day_mode: scan["message"]=f"Zero-day watch completed: {added_in_range} priority signals"
         if added!=added_in_range: scan["message"]+=f" ({added} collected total)"
@@ -351,7 +362,7 @@ async def start_zero_day_scan(request:Request,bg:BackgroundTasks,db:Session=Depe
     if not setup.technologies or not setup.sources: raise HTTPException(400,"Choose at least one technology and one source before scanning for zero-days.")
     running=next((scan for scan in SCANS_CACHE.values() if scan["setup_id"]==setup.id and scan["status"] in ("queued","running")),None)
     if running: raise HTTPException(409,"A scan is already running for this setup.")
-    for finding in FINDINGS_CACHE.pop(setup.id,[]): CHAT_CACHE.pop(finding.id,None)
+    for finding in ZERO_DAY_FINDINGS_CACHE.pop(setup.id,[]): CHAT_CACHE.pop(finding.id,None)
     start=datetime.now(timezone.utc); setup.next_scan_at=start+timedelta(seconds=settings.scan_interval_seconds); scan_id=next(SCAN_IDS); SCANS_CACHE[scan_id]={"id":scan_id,"setup_id":setup.id,"kind":"zero_day","status":"queued","progress":0,"message":"Zero-day watch queued","findings_count":0,"sources":[],"metrics":{"zero_day_mentions":0,"active_exploitation":0,"critical_priority":0,"sources_checked":0,"live_sources":0}}; db.commit(); bg.add_task(run_scan,scan_id)
     return {"scan_id":scan_id,"status":"queued","next_scan_at":setup.next_scan_at}
 @app.get("/api/scans/{scan_id}")
@@ -365,6 +376,10 @@ def findings(request:Request,page:int=1,page_size:int=settings.results_page_size
     all_rows=scoped_findings(db,setup,params); total=len(all_rows); pages=max(1,math.ceil(total/page_size)); page=max(1,min(page,pages)); rows=all_rows[(page-1)*page_size:page*page_size]
     biggest=biggest_threat(scoped_findings(db,setup,{}))
     return {"items":[serial_finding(f) for f in rows],"biggest":serial_finding(biggest) if biggest else None,"page":page,"pages":pages,"total":total}
+@app.get("/api/zero-day-findings")
+def zero_day_findings(request:Request,db:Session=Depends(get_db)):
+    setup=ensure_workspace(db,request.state.client_id); rows=scoped_zero_day_findings(setup)
+    return {"items":[serial_finding(f) for f in rows],"total":len(rows),"scanned":setup.id in ZERO_DAY_FINDINGS_CACHE}
 @app.put("/api/findings/{fid}/review")
 def review(fid:int,data:ReviewIn,request:Request,db:Session=Depends(get_db)):
     f=cached_finding(fid,db,request.state.client_id)
