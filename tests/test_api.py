@@ -42,7 +42,8 @@ def test_home_active_name(client):
     assert "/?open=setups" in about.text and "/?open=import" in about.text
     assert "How to use the website" in about.text and "Define your scope" in about.text
     assert "AI-assisted summaries" in about.text and "independent workspace" in about.text
-    assert "Arsen Eliane" in about.text and "Information Security Department" in about.text
+    assert "Arsen Eliane" in about.text and "ChatGPT" in about.text and "internship project" in about.text
+    assert "Alfa" not in about.text and "Information Security Department" not in about.text
     assert 'new URLSearchParams(location.search).get("open")' in js.text
     assert 'link.download=`My-ThreatLens-Results-${stamp}.xlsx`' in js.text
     assert "scopeDirty=true" in js.text and "showPendingScopeState()" in js.text
