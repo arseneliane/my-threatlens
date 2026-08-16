@@ -400,7 +400,6 @@ async def run_scan(scan_id):
         scan["message"]=f"Completed — {added_in_range} findings in selected date range"
         if zero_day_mode: scan["message"]=f"Zero-day watch completed: {added_in_range} priority signals"
         if added!=added_in_range: scan["message"]+=f" ({added} collected total)"
-        scan["message"]+=f" · {live_sources}/{len(sources)} sources live"
         setup.last_scan_at=datetime.now(timezone.utc); db.commit()
     await send_new_critical_alerts([finding for finding in results if publication_in_setup_range(finding.publication_date,setup,scan_now)],setup)
 @app.post("/api/scans",status_code=202)
