@@ -33,7 +33,7 @@ def test_severity_rules():
     assert severity(cvss=9.8)[0]=="Critical"
     assert severity(vendor="Important")[0]=="High"
     assert severity(kev=True)[0]=="High"
-    assert severity()[0]=="Unknown"
+    assert severity()[0]=="Informational"
     assert severity(text="This critical-severity flaw is actively exploited")[0]=="Critical"
     assert severity(text="Attackers are exploiting this zero-day in the wild")[0]=="High"
     assert severity(text="The issue allows remote code execution")[0]=="High"

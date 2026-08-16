@@ -8,14 +8,14 @@ from html import escape
 import httpx
 
 EMAIL_PATTERN=re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
-SEVERITY_COLORS={"Critical":"#b42318","High":"#dc6803","Medium":"#b78b00","Low":"#07835d","Unknown":"#667085"}
+SEVERITY_COLORS={"Critical":"#b42318","High":"#dc6803","Medium":"#b78b00","Low":"#07835d","Informational":"#667085"}
 ZOHO_TOKEN_CACHE={"access_token":"","expires_at":0.0,"account_id":""}
 
 class EmailDeliveryError(Exception): pass
 
 def render_findings_html(findings,setup,intro=""):
     counts=Counter(f.severity for f in findings)
-    count_text=" · ".join(f"{escape(level)} {counts[level]}" for level in ("Critical","High","Medium","Low","Unknown") if counts[level]) or "No matching findings"
+    count_text=" · ".join(f"{escape(level)} {counts[level]}" for level in ("Critical","High","Medium","Low","Informational") if counts[level]) or "No matching findings"
     cards=[]
     for f in findings:
         cves=", ".join(f.cves or []) or "No CVE"; published=f.publication_date.strftime("%Y-%m-%d")

@@ -182,3 +182,4 @@
 @media (prefers-reduced-motion: reduce) {
   .zero-day-button { animation: none !important; transition: none; }
 }
+.badge.Informational{background:#667085}

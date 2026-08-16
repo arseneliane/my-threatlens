@@ -20,6 +20,8 @@ def test_home_active_name(client):
     assert 'id="zeroDayResults"' in r.text and "/api/zero-day-findings" in js.text
     assert "function zeroDayRowHtml(f)" in js.text
     assert client.get("/static/zero-day.css").status_code==200
+    assert "Informational" in r.text and ">Unknown<" not in r.text
+    assert "Scan every 30 minutes" in r.text and "9:00 a.m. Beirut time" in r.text
     assert "/static/my-threatlens-logo.png" in r.text
     assert client.get("/static/my-threatlens-logo.png").status_code==200
     assert 'id="appSidebar"' in r.text and "function toggleSidebar()" in js.text
@@ -158,6 +160,47 @@ def test_automatic_email_settings_are_saved_per_setup(client):
     assert saved.json()["critical_enabled"] is False
     too_many=client.put("/api/automatic-email",json={"recipients":[f"user{i}@example.com" for i in range(11)]})
     assert too_many.status_code==422
+
+def test_automatic_scheduler_has_daily_and_30_minute_jobs(client):
+    from app import main
+    assert main.AUTOMATION_SCHEDULER.get_job("daily-email")
+    job=main.AUTOMATION_SCHEDULER.get_job("critical-scan")
+    assert job and int(job.trigger.interval.total_seconds())==1800
+
+def test_automatic_30_minute_scan_runs_configured_setup(client,monkeypatch):
+    import asyncio
+    from sqlalchemy import delete
+    from app import main
+    from app.database import SessionLocal
+    from app.models import EmailAutomation
+    with SessionLocal() as db:
+        db.execute(delete(EmailAutomation)); db.commit()
+    client.put("/api/automatic-email",json={"recipients":["supervisor@example.com"],"daily_enabled":True,"critical_enabled":True})
+    started=[]
+    async def fake_run_scan(scan_id): started.append(main.SCANS_CACHE[scan_id])
+    monkeypatch.setattr(main,"run_scan",fake_run_scan)
+    main.SCANS_CACHE.clear()
+    asyncio.run(main.run_automatic_critical_scans())
+    assert len(started)==1 and started[0]["message"]=="Automatic 30-minute scan queued"
+
+def test_daily_email_contains_only_critical_findings(client,monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+    from sqlalchemy import delete
+    from app import main
+    from app.database import SessionLocal
+    from app.models import EmailAutomation
+    with SessionLocal() as db:
+        db.execute(delete(EmailAutomation)); db.commit()
+    client.put("/api/automatic-email",json={"recipients":["supervisor@example.com"],"daily_enabled":True,"critical_enabled":True})
+    monkeypatch.setattr(main,"run_scan",lambda scan_id: asyncio.sleep(0))
+    findings=[SimpleNamespace(severity="Critical",kev=False,ai_score=90,cvss=9.8,publication_date=datetime.now(timezone.utc)),SimpleNamespace(severity="High",kev=False,ai_score=80,cvss=8.0,publication_date=datetime.now(timezone.utc))]
+    monkeypatch.setattr(main,"scoped_findings",lambda db,setup,params:findings)
+    delivered=[]
+    async def fake_delivery(subject,body,rows,setup,status_key,recipients): delivered.extend(rows); return True
+    monkeypatch.setattr(main,"deliver_automatic_email",fake_delivery)
+    asyncio.run(main.run_daily_email_report())
+    assert [finding.severity for finding in delivered]==["Critical"]
 def test_automatic_email_test_sends_to_every_saved_recipient(client,monkeypatch):
     from app import main
     sent=[]

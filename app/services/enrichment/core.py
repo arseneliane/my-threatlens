@@ -5,7 +5,7 @@ def extract_cves(text):
 def severity(source=None, cvss=None, vendor=None, kev=False, text=""):
     if source: return source.title(), f"Source rating: {source.title()}"
     if cvss is not None:
-        level="Critical" if cvss>=9 else "High" if cvss>=7 else "Medium" if cvss>=4 else "Low" if cvss>0 else "Unknown"
+        level="Critical" if cvss>=9 else "High" if cvss>=7 else "Medium" if cvss>=4 else "Low" if cvss>0 else "Informational"
         return level, f"Calculated from CVSS {cvss:g}"
     if vendor:
         mapping={"important":"High","high":"High","moderate":"Medium","medium":"Medium","critical":"Critical","low":"Low"}
@@ -29,7 +29,7 @@ def severity(source=None, cvss=None, vendor=None, kev=False, text=""):
         return "High","Impact-based estimate: source describes a high-impact vulnerability class"
     if re.search(r"\b(?:cross-site scripting|SQL injection|command injection|directory traversal|server-side request forgery)\b",text,re.I):
         return "Medium","Impact-based estimate from the vulnerability class described by the source"
-    return "Unknown","No reliable severity evidence"
+    return "Informational","No reliable severity rating was published"
 def relevance(t, k, cvss=None, kev=False, text=""):
     score=min(100, int(t*.7+k*.7+(20 if kev else 0)+(min(cvss or 0,10)*2)+(8 if re.search(r"\b(?:actively exploited|proof.of.concept|PoC)\b",text,re.I) else 0)))
     return score, "High" if score>=75 else "Medium" if score>=45 else "Low", f"Technology {t}/50; keyword {k}/50" + ("; CISA KEV" if kev else "")

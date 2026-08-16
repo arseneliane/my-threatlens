@@ -11,7 +11,7 @@ def create_workbook(findings, setup, filters):
     wb=Workbook(); ws=wb.active; ws.title="Results"
     heads=["Severity","Technology","Finding","Summary","Publication Date","CVEs (max 5)","Source","Source URL","AI Relevance","AI Confidence"]
     ws.append(heads); ws.freeze_panes="A2"; ws.auto_filter.ref="A1:J1"
-    colors={"Critical":"D92D20","High":"F79009","Medium":"FEC84B","Low":"12B76A","Unknown":"667085"}
+    colors={"Critical":"D92D20","High":"F79009","Medium":"FEC84B","Low":"12B76A","Informational":"667085"}
     for i,f in enumerate(findings,2):
         ws.append([f.severity,f.technology,safe(f.title),safe(f.summary),f.publication_date.replace(tzinfo=None),", ".join(f.cves[:5]),f.source,f.url,f"{f.ai_score}/100",f.ai_confidence])
         ws.cell(i,1).fill=PatternFill("solid",fgColor=colors.get(f.severity,"667085")); ws.cell(i,1).font=Font(color="FFFFFF",bold=True)

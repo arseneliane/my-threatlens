@@ -4,6 +4,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Request, BackgroundTasks
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -220,11 +221,11 @@ def serial_finding(f):
     return {"id":f.id,"severity":f.severity,"severity_basis":f.severity_basis,"technology":f.technology,"matched_technologies":f.matched_technologies,"matched_keywords":f.matched_keywords,"title":f.title,"summary":f.summary,"ai_summary":quick_summary(f),"url":f.url,"publication_date":f.publication_date,"cves":f.cves,"source":f.source,"ai_score":f.ai_score,"ai_confidence":f.ai_confidence,"ai_reason":f.ai_reason,"review_state":f.review_state,"notes":f.notes,"checklist":f.checklist}
 
 def biggest_threat(rows):
-    severity_rank={"Critical":4,"High":3,"Medium":2,"Low":1,"Unknown":0}
+    severity_rank={"Critical":4,"High":3,"Medium":2,"Low":1,"Informational":0}
     return max(rows,key=lambda f:(severity_rank.get(f.severity,0),bool(f.kev),f.ai_score or 0,f.cvss or 0,utc_publication_date(f.publication_date)),default=None)
 
 def top_findings(rows,limit):
-    severity_rank={"Critical":4,"High":3,"Medium":2,"Low":1,"Unknown":0}
+    severity_rank={"Critical":4,"High":3,"Medium":2,"Low":1,"Informational":0}
     return sorted(rows,key=lambda f:(severity_rank.get(f.severity,0),bool(f.kev),f.ai_score or 0,f.cvss or 0,utc_publication_date(f.publication_date)),reverse=True)[:limit]
 
 def automatic_email_setup(db):
@@ -275,11 +276,27 @@ async def run_daily_email_report():
         with SessionLocal() as db:
             setup=db.get(Setup,setup_id)
             if not setup or not setup.technologies or not setup.keywords or not setup.sources: continue
-            scan_id=next(SCAN_IDS); SCANS_CACHE[scan_id]={"id":scan_id,"setup_id":setup.id,"kind":"standard","status":"queued","progress":0,"message":"Scheduled daily scan queued","findings_count":0,"sources":[],"metrics":{}}
+            scan_id=next(SCAN_IDS); SCANS_CACHE[scan_id]={"id":scan_id,"setup_id":setup.id,"kind":"standard","status":"queued","progress":0,"message":"Scheduled daily scan queued","findings_count":0,"sources":[],"metrics":{},"suppress_critical_email":True}
         await run_scan(scan_id)
         with SessionLocal() as db:
-            setup=db.get(Setup,setup_id); rows=scoped_findings(db,setup,{})
+            setup=db.get(Setup,setup_id); rows=[finding for finding in scoped_findings(db,setup,{}) if finding.severity=="Critical"]
             await deliver_automatic_email(subject,body,top_findings(rows,5),setup,"last_daily_sent_at",recipients)
+
+async def run_automatic_critical_scans():
+    """Refresh configured setups every interval; run_scan emails new Critical items."""
+    with SessionLocal() as db:
+        configs=db.scalars(select(EmailAutomation).where(EmailAutomation.critical_enabled==True)).all()
+        setup_ids=[config.setup_id for config in configs if config.recipients]
+        if not setup_ids and environment_recipients():
+            setup=automatic_email_setup(db)
+            if setup: setup_ids=[setup.id]
+    for setup_id in dict.fromkeys(setup_ids):
+        if any(scan.get("setup_id")==setup_id and scan.get("status") in ("queued","running") for scan in SCANS_CACHE.values()): continue
+        with SessionLocal() as db:
+            setup=db.get(Setup,setup_id)
+            if not setup or not setup.technologies or not setup.keywords or not setup.sources: continue
+            scan_id=next(SCAN_IDS); SCANS_CACHE[scan_id]={"id":scan_id,"setup_id":setup.id,"kind":"standard","status":"queued","progress":0,"message":"Automatic 30-minute scan queued","findings_count":0,"sources":[],"metrics":{}}
+        await run_scan(scan_id)
 
 @app.on_event("startup")
 async def startup():
@@ -316,7 +333,8 @@ async def startup():
     AUTOMATIC_EMAIL_STATUS["enabled"]=True
     zone=ZoneInfo(settings.automatic_email_timezone)
     AUTOMATION_SCHEDULER=AsyncIOScheduler(timezone=zone)
-    AUTOMATION_SCHEDULER.add_job(run_daily_email_report,CronTrigger(hour=settings.automatic_email_hour,minute=settings.automatic_email_minute,timezone=zone),id="daily-email",replace_existing=True,coalesce=True,max_instances=1)
+    AUTOMATION_SCHEDULER.add_job(run_daily_email_report,CronTrigger(hour=settings.automatic_email_hour,minute=settings.automatic_email_minute,timezone=zone),id="daily-email",replace_existing=True,coalesce=True,max_instances=1,misfire_grace_time=86400)
+    AUTOMATION_SCHEDULER.add_job(run_automatic_critical_scans,IntervalTrigger(seconds=settings.scan_interval_seconds),id="critical-scan",replace_existing=True,coalesce=True,max_instances=1,misfire_grace_time=None)
     AUTOMATION_SCHEDULER.start()
 
 @app.on_event("shutdown")
@@ -508,7 +526,8 @@ async def run_scan(scan_id):
             scan["message"]=f"Completed — no findings were published in the selected date range; {added} older matching items were excluded"
         if zero_day_mode: scan["message"]=f"Zero-day watch completed: {added_in_range} priority signals"
         setup.last_scan_at=datetime.now(timezone.utc); db.commit()
-    await send_new_critical_alerts([finding for finding in results if publication_in_setup_range(finding.publication_date,setup,scan_now)],setup)
+    if not scan.get("suppress_critical_email"):
+        await send_new_critical_alerts([finding for finding in results if publication_in_setup_range(finding.publication_date,setup,scan_now)],setup)
 @app.post("/api/scans",status_code=202)
 async def start_scan(request:Request,bg:BackgroundTasks,db:Session=Depends(get_db)):
     setup=ensure_workspace(db,request.state.client_id)
@@ -548,12 +567,12 @@ def zero_day_findings(request:Request,db:Session=Depends(get_db)):
 def automatic_email_status():
     recipient=settings.automatic_email_recipient.strip()
     masked=(recipient[:2]+"…@"+recipient.split("@",1)[1]) if "@" in recipient else ""
-    return {**AUTOMATIC_EMAIL_STATUS,"recipient":masked,"timezone":settings.automatic_email_timezone,"daily_time":f"{settings.automatic_email_hour:02d}:{settings.automatic_email_minute:02d}","critical_alerts":settings.critical_email_enabled}
+    return {**AUTOMATIC_EMAIL_STATUS,"recipient":masked,"timezone":settings.automatic_email_timezone,"daily_time":f"{settings.automatic_email_hour:02d}:{settings.automatic_email_minute:02d}","scan_interval_minutes":settings.scan_interval_seconds//60,"critical_alerts":settings.critical_email_enabled}
 @app.get("/api/automatic-email")
 def get_automatic_email(request:Request,db:Session=Depends(get_db)):
     setup=ensure_workspace(db,request.state.client_id)
     config=db.scalar(select(EmailAutomation).where(EmailAutomation.setup_id==setup.id))
-    return {"recipients":list(config.recipients or []) if config else [],"daily_enabled":config.daily_enabled if config else True,"critical_enabled":config.critical_enabled if config else True,"subject":config.subject if config else "My ThreatLens security alert","message":config.message if config else "Kindly review the threats below and take the required action.","timezone":settings.automatic_email_timezone,"daily_time":f"{settings.automatic_email_hour:02d}:{settings.automatic_email_minute:02d}"}
+    return {"recipients":list(config.recipients or []) if config else [],"daily_enabled":config.daily_enabled if config else True,"critical_enabled":config.critical_enabled if config else True,"subject":config.subject if config else "My ThreatLens security alert","message":config.message if config else "Kindly review the threats below and take the required action.","timezone":settings.automatic_email_timezone,"daily_time":f"{settings.automatic_email_hour:02d}:{settings.automatic_email_minute:02d}","scan_interval_minutes":settings.scan_interval_seconds//60}
 @app.put("/api/automatic-email")
 def save_automatic_email(data:EmailAutomationIn,request:Request,db:Session=Depends(get_db)):
     setup=ensure_workspace(db,request.state.client_id)
