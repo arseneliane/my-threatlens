@@ -19,6 +19,8 @@ def test_home_active_name(client):
     assert "function startZeroDayScan()" in js.text and "/api/scans/zero-days" in js.text
     assert 'id="zeroDayResults"' in r.text and "/api/zero-day-findings" in js.text
     assert "function zeroDayRowHtml(f)" in js.text
+    assert 'id="confirmedZeroDayRows"' in r.text and 'id="activeExploitationRows"' in r.text
+    assert "Confirmed Zero-Day Findings" in r.text and "Active Exploitation &amp; Other Priority Signals" in r.text
     assert client.get("/static/zero-day.css").status_code==200
     assert "Informational" in r.text and ">Unknown<" not in r.text
     assert "Scan every 30 minutes" in r.text and "9:00 a.m. Beirut time" in r.text
@@ -301,6 +303,10 @@ def test_zero_day_addon_scans_independently_of_regular_keywords(client):
     zero_day_findings=client.get("/api/zero-day-findings").json()
     assert normal_findings["total"]==0
     assert zero_day_findings["scanned"] is True and zero_day_findings["total"]==status["findings_count"]
+    assert zero_day_findings["total"]==zero_day_findings["zero_day_total"]+zero_day_findings["active_exploitation_total"]
+    assert zero_day_findings["zero_day_total"]>=1 and zero_day_findings["active_exploitation_total"]>=1
+    assert all(finding["priority_category"]=="zero_day" for finding in zero_day_findings["zero_days"])
+    assert all(finding["priority_category"]=="active_exploitation" for finding in zero_day_findings["active_exploitation"])
     assert zero_day_findings["metrics"]==status["metrics"] and len(zero_day_findings["sources"])==1
     assert all("SQL Injection" not in finding["matched_keywords"] for finding in zero_day_findings["items"])
     normal_scan=client.post("/api/scans").json()

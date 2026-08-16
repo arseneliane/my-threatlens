@@ -218,7 +218,11 @@ def cached_finding(fid,db=None,owner_id=None):
     return finding
 
 def serial_finding(f):
-    return {"id":f.id,"severity":f.severity,"severity_basis":f.severity_basis,"technology":f.technology,"matched_technologies":f.matched_technologies,"matched_keywords":f.matched_keywords,"title":f.title,"summary":f.summary,"ai_summary":quick_summary(f),"url":f.url,"publication_date":f.publication_date,"cves":f.cves,"source":f.source,"ai_score":f.ai_score,"ai_confidence":f.ai_confidence,"ai_reason":f.ai_reason,"review_state":f.review_state,"notes":f.notes,"checklist":f.checklist}
+    return {"id":f.id,"severity":f.severity,"severity_basis":f.severity_basis,"technology":f.technology,"matched_technologies":f.matched_technologies,"matched_keywords":f.matched_keywords,"title":f.title,"summary":f.summary,"ai_summary":quick_summary(f),"url":f.url,"publication_date":f.publication_date,"cves":f.cves,"source":f.source,"ai_score":f.ai_score,"ai_confidence":f.ai_confidence,"ai_reason":f.ai_reason,"review_state":f.review_state,"notes":f.notes,"checklist":f.checklist,"priority_category":priority_category(f)}
+
+def priority_category(f):
+    text=f"{f.title or ''} {f.summary or ''}"
+    return "zero_day" if re.search(r"\b(?:zero[- ]day|0-day)\b",text,re.I) else "active_exploitation"
 
 def biggest_threat(rows):
     severity_rank={"Critical":4,"High":3,"Medium":2,"Low":1,"Informational":0}
@@ -562,7 +566,9 @@ def findings(request:Request,page:int=1,page_size:int=settings.results_page_size
 def zero_day_findings(request:Request,db:Session=Depends(get_db)):
     setup=ensure_workspace(db,request.state.client_id); rows=scoped_zero_day_findings(setup)
     latest=max((scan for scan in SCANS_CACHE.values() if scan.get("setup_id")==setup.id and scan.get("kind")=="zero_day"),key=lambda scan:scan["id"],default=None)
-    return {"items":[serial_finding(f) for f in rows],"total":len(rows),"scanned":setup.id in ZERO_DAY_FINDINGS_CACHE,"metrics":(latest or {}).get("metrics",{}),"sources":(latest or {}).get("sources",[])}
+    zero_days=[f for f in rows if priority_category(f)=="zero_day"]
+    exploitation=[f for f in rows if priority_category(f)=="active_exploitation"]
+    return {"items":[serial_finding(f) for f in rows],"zero_days":[serial_finding(f) for f in zero_days],"active_exploitation":[serial_finding(f) for f in exploitation],"total":len(rows),"zero_day_total":len(zero_days),"active_exploitation_total":len(exploitation),"scanned":setup.id in ZERO_DAY_FINDINGS_CACHE,"metrics":(latest or {}).get("metrics",{}),"sources":(latest or {}).get("sources",[])}
 @app.get("/api/automatic-email/status")
 def automatic_email_status():
     recipient=settings.automatic_email_recipient.strip()
