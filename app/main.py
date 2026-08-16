@@ -432,7 +432,7 @@ async def run_scan(scan_id):
             newest=max((utc_publication_date(finding.publication_date) for finding in results),default=None)
             newest_age_days=max(1,math.ceil((scan_now-newest).total_seconds()/86400)) if newest else None
             recommended_range=next((f"{days}d" for days in (3,7,14,30,60,90) if newest_age_days is not None and days>=newest_age_days),None)
-            metrics={"matched_total":added,"in_range":added_in_range,"excluded_by_date":added-added_in_range,"recommended_range":recommended_range}
+            metrics={"matched_total":added,"in_range":added_in_range,"excluded_by_date":added-added_in_range,"recommended_range":recommended_range,"sources_checked":len(sources),"live_sources":live_sources,"unavailable_sources":len(sources)-live_sources}
         result_cache[setup.id]=results; scan.update(status="completed",progress=100,findings_count=added_in_range,sources=source_states,metrics=metrics)
         scan["message"]=f"Completed — {added_in_range} findings in selected date range"
         if not zero_day_mode and added_in_range==0 and added:

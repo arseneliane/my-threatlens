@@ -154,7 +154,7 @@ def test_scan_202_completion_filters_export(client,monkeypatch):
         if status["status"]=="completed": break
         time.sleep(.03)
     assert status["status"]=="completed"
-    assert {"matched_total","in_range","excluded_by_date","recommended_range"}.issubset(status["metrics"])
+    assert {"matched_total","in_range","excluded_by_date","recommended_range","sources_checked","live_sources","unavailable_sources"}.issubset(status["metrics"])
     result=client.get("/api/findings?severity=Critical").json(); assert result["page"]==1 and result["pages"]>=1
     assert result["biggest"] and result["biggest"]["id"]
     sent={}

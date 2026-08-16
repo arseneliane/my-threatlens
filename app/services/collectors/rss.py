@@ -1,3 +1,4 @@
+import asyncio
 import calendar
 import re
 from datetime import datetime, timezone, timedelta
@@ -48,6 +49,47 @@ def parse_feed(content: bytes, source: str, limit: int) -> list[dict]:
     return items
 
 
+def parse_hacker_news_homepage(content: bytes, limit: int) -> list[dict]:
+    """Extract current THN stories when its public RSS mirror is stale."""
+    soup=BeautifulSoup(content,"html.parser"); items=[]
+    for card in soup.select("div.body-post"):
+        link=card.select_one("a.story-link[href]"); title=card.select_one("h2.home-title"); summary=card.select_one("div.home-desc")
+        if not link or not title or not summary: continue
+        url=link.get("href","")
+        if not url.startswith("https://thehackernews.com/"): continue
+        items.append({"source":"The Hacker News","title":title.get_text(" ",strip=True),"summary":summary.get_text(" ",strip=True),"url":url,"publication_date":None,"cvss":None,"vendor_severity":None})
+        if len(items)>=limit: break
+    return items
+
+
+async def _get_with_retry(client,url,**kwargs):
+    last_error=None
+    for attempt in range(2):
+        try:
+            response=await client.get(url,**kwargs); response.raise_for_status(); return response
+        except Exception as exc:
+            last_error=exc
+            if attempt==0: await asyncio.sleep(.25)
+    raise last_error
+
+
+async def _collect_hacker_news_homepage(client,limit):
+    response=await _get_with_retry(client,"https://thehackernews.com/")
+    candidates=parse_hacker_news_homepage(response.content,min(limit,20))
+    semaphore=asyncio.Semaphore(5)
+    async def enrich(item):
+        try:
+            async with semaphore:
+                article=await _get_with_retry(client,item["url"])
+            timestamp=re.search(r"\b20\d{2}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})",article.text)
+            if not timestamp: return None
+            item["publication_date"]=datetime.fromisoformat(timestamp.group(0).replace("Z","+00:00"))
+            return item
+        except Exception:
+            return None
+    return [item for item in await asyncio.gather(*(enrich(item) for item in candidates)) if item]
+
+
 def parse_nvd(payload: dict, limit: int) -> list[dict]:
     items=[]
     for wrapper in payload.get("vulnerabilities",[])[:limit]:
@@ -68,8 +110,8 @@ def parse_nvd(payload: dict, limit: int) -> list[dict]:
 async def _collect_nvd(client, limit, days):
     start=(datetime.now(timezone.utc)-timedelta(days=min(max(days,1),120))).isoformat(timespec="milliseconds").replace("+00:00","Z")
     end=datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00","Z")
-    response=await client.get("https://services.nvd.nist.gov/rest/json/cves/2.0",params={"pubStartDate":start,"pubEndDate":end,"resultsPerPage":min(limit,2000)})
-    response.raise_for_status(); return parse_nvd(response.json(),limit)
+    response=await _get_with_retry(client,"https://services.nvd.nist.gov/rest/json/cves/2.0",params={"pubStartDate":start,"pubEndDate":end,"resultsPerPage":min(limit,2000)})
+    return parse_nvd(response.json(),limit)
 
 
 async def collect_source(source: str, timeout: int, limit: int, live: bool=True, days: int=7) -> tuple[list[dict],str]:
@@ -77,6 +119,11 @@ async def collect_source(source: str, timeout: int, limit: int, live: bool=True,
     headers={"User-Agent":"MyThreatLens/1.0 (+local threat monitoring)","Accept":"application/rss+xml, application/atom+xml, application/xml, text/xml, application/json"}
     errors=[]
     async with httpx.AsyncClient(timeout=timeout,follow_redirects=True,max_redirects=3,headers=headers) as client:
+        if source=="The Hacker News":
+            try:
+                items=await _collect_hacker_news_homepage(client,limit)
+                if items: return items,"live homepage"
+            except Exception as exc: errors.append(str(exc))
         if source=="NVD":
             try:
                 items=await _collect_nvd(client,limit,days)
@@ -84,11 +131,10 @@ async def collect_source(source: str, timeout: int, limit: int, live: bool=True,
             except Exception as exc: errors.append(str(exc))
         for url in SOURCE_FEEDS.get(source,()):
             try:
-                response=await client.get(url); response.raise_for_status()
+                response=await _get_with_retry(client,url)
                 if len(response.content)>5_000_000: raise ValueError("Feed exceeded response-size limit")
                 items=parse_feed(response.content,source,limit)
                 if items: return items,"live feed"
             except Exception as exc: errors.append(str(exc))
-    fallback=fixture_items(source)
     reason="; ".join(errors[-2:]) or "No public collector is configured for this source"
-    return fallback,(f"fixture fallback: {reason}" if fallback else f"unavailable: {reason}")
+    return [],f"unavailable: {reason}"

@@ -8,7 +8,7 @@ from app.main import quick_summary
 from app.main import utc_publication_date
 from app.services.chat import clean_model_response, ollama_error_message, ollama_headers, site_system_prompt
 from app.services.collectors.fixtures import ITEMS
-from app.services.collectors.rss import SOURCE_FEEDS, parse_feed, parse_nvd
+from app.services.collectors.rss import SOURCE_FEEDS, parse_feed, parse_nvd, parse_hacker_news_homepage
 
 def test_alias_owa_exchange_and_keyword():
     m=match_item("Russian hackers exploit Microsoft OWA flaw allowing remote code execution",["Outlook Web Access","Exchange Server"],["Exploit","RCE"])
@@ -79,6 +79,12 @@ def test_live_rss_parser_preserves_dates_and_links():
     assert len(items)==1 and items[0]["publication_date"].year==2026
     assert items[0]["url"].startswith("https://thehackernews.com/")
     assert items[0]["cvss"]==9.8
+
+def test_hacker_news_homepage_parser_finds_current_story():
+    html=b"""<div class='body-post clear'><a class='story-link' href='https://thehackernews.com/2026/08/apple-macos-screen-sharing-flaw.html'><h2 class='home-title'>Apple macOS Screen Sharing Flaw Exploited</h2><div class='home-desc'>Apple macOS CVE-2026-65400 is under active exploitation.</div></a></div>"""
+    items=parse_hacker_news_homepage(html,20)
+    assert len(items)==1 and items[0]["source"]=="The Hacker News"
+    assert "macOS" in items[0]["title"] and items[0]["url"].startswith("https://thehackernews.com/")
 
 def test_html_email_contains_findings_without_excel_attachment():
     from datetime import datetime,timezone

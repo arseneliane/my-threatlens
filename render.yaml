@@ -31,7 +31,7 @@ services:
       - key: LIVE_COLLECTORS_ENABLED
         value: "true"
       - key: REQUEST_TIMEOUT_SECONDS
-        value: "6"
+        value: "15"
       - key: MAX_RESULTS_PER_SOURCE
         value: "60"
       - key: RESULTS_PAGE_SIZE
