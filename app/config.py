@@ -29,6 +29,12 @@ class Settings(BaseSettings):
     zoho_from_email: str = ""
     zoho_accounts_base_url: str = "https://accounts.zoho.com"
     zoho_mail_base_url: str = "https://mail.zoho.com"
+    automatic_email_recipient: str = ""
+    automatic_email_timezone: str = "Asia/Beirut"
+    automatic_email_hour: int = 9
+    automatic_email_minute: int = 0
+    automatic_email_setup_name: str = ""
+    critical_email_enabled: bool = True
     ollama_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "gpt-oss:20b"
     ollama_api_key: str = ""

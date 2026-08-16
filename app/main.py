@@ -1,6 +1,9 @@
 import asyncio, base64, binascii, hashlib, itertools, math, re, secrets, smtplib, uuid
 from datetime import date, datetime, timezone, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Request, BackgroundTasks
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -34,6 +37,9 @@ SCAN_IDS=itertools.count(1)
 INSTANCE_ID=str(uuid.uuid4())
 CLIENT_COOKIE="threatlens_client"
 ZERO_DAY_SCAN_KEYWORDS=["Zero-Day","Active Exploitation","Exploit","CISA KEV","Proof of Concept"]
+AUTOMATIC_EMAIL_STATUS={"enabled":False,"last_daily_sent_at":None,"last_critical_sent_at":None,"last_error":None}
+AUTOMATICALLY_ALERTED_FINGERPRINTS=set()
+AUTOMATION_SCHEDULER=None
 
 @app.middleware("http")
 async def protect_hosted_demo(request:Request,call_next):
@@ -201,8 +207,40 @@ def biggest_threat(rows):
     severity_rank={"Critical":4,"High":3,"Medium":2,"Low":1,"Unknown":0}
     return max(rows,key=lambda f:(severity_rank.get(f.severity,0),bool(f.kev),f.ai_score or 0,f.cvss or 0,utc_publication_date(f.publication_date)),default=None)
 
+def automatic_email_setup(db):
+    query=select(Setup).where(Setup.active==True)
+    if settings.automatic_email_setup_name.strip(): query=query.where(Setup.display_name==settings.automatic_email_setup_name.strip())
+    return db.scalar(query.order_by(Setup.updated_at.desc(),Setup.id.desc()))
+
+async def deliver_automatic_email(subject,body,rows,setup,status_key):
+    if not settings.automatic_email_recipient.strip() or not rows: return False
+    try:
+        await asyncio.to_thread(send_findings_email,settings,settings.automatic_email_recipient.strip(),subject,body,rows,setup)
+        AUTOMATIC_EMAIL_STATUS[status_key]=datetime.now(timezone.utc).isoformat(); AUTOMATIC_EMAIL_STATUS["last_error"]=None
+        return True
+    except Exception as exc:
+        AUTOMATIC_EMAIL_STATUS["last_error"]=f"{type(exc).__name__}: automatic email delivery failed"
+        return False
+
+async def send_new_critical_alerts(rows,setup):
+    if not settings.critical_email_enabled: return
+    fresh=[finding for finding in rows if finding.severity=="Critical" and finding.fingerprint not in AUTOMATICALLY_ALERTED_FINGERPRINTS]
+    if not fresh: return
+    if await deliver_automatic_email("My ThreatLens — critical threat alert","A new critical threat requires immediate review.",fresh[:10],setup,"last_critical_sent_at"):
+        AUTOMATICALLY_ALERTED_FINGERPRINTS.update(finding.fingerprint for finding in fresh)
+
+async def run_daily_email_report():
+    with SessionLocal() as db:
+        setup=automatic_email_setup(db)
+        if not setup or not setup.technologies or not setup.keywords or not setup.sources: return
+        scan_id=next(SCAN_IDS); SCANS_CACHE[scan_id]={"id":scan_id,"setup_id":setup.id,"kind":"standard","status":"queued","progress":0,"message":"Scheduled daily scan queued","findings_count":0,"sources":[],"metrics":{}}
+    await run_scan(scan_id)
+    with SessionLocal() as db:
+        setup=db.get(Setup,SCANS_CACHE[scan_id]["setup_id"]); rows=scoped_findings(db,setup,{})
+        await deliver_automatic_email("My ThreatLens — daily 9:00 security report","Daily monitoring summary. Review the highest-priority findings below.",rows[:50],setup,"last_daily_sent_at")
+
 @app.on_event("startup")
-def startup():
+async def startup():
     if settings.database_url.startswith("sqlite"):
         with engine.begin() as conn:
             if "setups" in inspect(conn).get_table_names():
@@ -219,6 +257,19 @@ def startup():
         db.execute(sql_delete(SourceStatus)); db.execute(sql_delete(ChatMessage)); db.execute(sql_delete(Finding)); db.execute(sql_delete(Scan))
         FINDINGS_CACHE.clear(); ZERO_DAY_FINDINGS_CACHE.clear(); SCANS_CACHE.clear(); CHAT_CACHE.clear(); SITE_CHAT_CACHE.clear()
         db.commit()
+    global AUTOMATION_SCHEDULER
+    AUTOMATIC_EMAIL_STATUS["enabled"]=bool(settings.automatic_email_recipient.strip())
+    if AUTOMATIC_EMAIL_STATUS["enabled"]:
+        zone=ZoneInfo(settings.automatic_email_timezone)
+        AUTOMATION_SCHEDULER=AsyncIOScheduler(timezone=zone)
+        AUTOMATION_SCHEDULER.add_job(run_daily_email_report,CronTrigger(hour=settings.automatic_email_hour,minute=settings.automatic_email_minute,timezone=zone),id="daily-email",replace_existing=True,coalesce=True,max_instances=1)
+        AUTOMATION_SCHEDULER.start()
+
+@app.on_event("shutdown")
+async def shutdown():
+    global AUTOMATION_SCHEDULER
+    if AUTOMATION_SCHEDULER and AUTOMATION_SCHEDULER.running: AUTOMATION_SCHEDULER.shutdown(wait=False)
+    AUTOMATION_SCHEDULER=None
 
 @app.exception_handler(Exception)
 async def errors(request, exc):
@@ -346,6 +397,7 @@ async def run_scan(scan_id):
         if added!=added_in_range: scan["message"]+=f" ({added} collected total)"
         scan["message"]+=f" · {live_sources}/{len(sources)} sources live"
         setup.last_scan_at=datetime.now(timezone.utc); db.commit()
+    await send_new_critical_alerts([finding for finding in results if publication_in_setup_range(finding.publication_date,setup,scan_now)],setup)
 @app.post("/api/scans",status_code=202)
 async def start_scan(request:Request,bg:BackgroundTasks,db:Session=Depends(get_db)):
     setup=ensure_workspace(db,request.state.client_id)
@@ -380,6 +432,11 @@ def findings(request:Request,page:int=1,page_size:int=settings.results_page_size
 def zero_day_findings(request:Request,db:Session=Depends(get_db)):
     setup=ensure_workspace(db,request.state.client_id); rows=scoped_zero_day_findings(setup)
     return {"items":[serial_finding(f) for f in rows],"total":len(rows),"scanned":setup.id in ZERO_DAY_FINDINGS_CACHE}
+@app.get("/api/automatic-email/status")
+def automatic_email_status():
+    recipient=settings.automatic_email_recipient.strip()
+    masked=(recipient[:2]+"…@"+recipient.split("@",1)[1]) if "@" in recipient else ""
+    return {**AUTOMATIC_EMAIL_STATUS,"recipient":masked,"timezone":settings.automatic_email_timezone,"daily_time":f"{settings.automatic_email_hour:02d}:{settings.automatic_email_minute:02d}","critical_alerts":settings.critical_email_enabled}
 @app.put("/api/findings/{fid}/review")
 def review(fid:int,data:ReviewIn,request:Request,db:Session=Depends(get_db)):
     f=cached_finding(fid,db,request.state.client_id)

@@ -113,6 +113,20 @@ def test_email_requires_valid_address_and_configuration(client,monkeypatch):
     monkeypatch.setattr(settings,"smtp_password","")
     unconfigured=client.post("/api/email",json={"recipient":"analyst@example.com","subject":"Report","message":"Attached"})
     assert unconfigured.status_code==503 and "SMTP_PASSWORD" in unconfigured.json()["detail"]
+def test_automatic_critical_email_is_deduplicated(monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+    from app import main
+    sent=[]
+    monkeypatch.setattr(main.settings,"automatic_email_recipient","supervisor@example.com")
+    monkeypatch.setattr(main.settings,"critical_email_enabled",True)
+    monkeypatch.setattr(main,"send_findings_email",lambda settings,recipient,subject,body,rows,setup:sent.append([row.fingerprint for row in rows]))
+    main.AUTOMATICALLY_ALERTED_FINGERPRINTS.clear()
+    finding=SimpleNamespace(severity="Critical",fingerprint="critical-one")
+    setup=SimpleNamespace(name="Default Setup")
+    asyncio.run(main.send_new_critical_alerts([finding],setup))
+    asyncio.run(main.send_new_critical_alerts([finding],setup))
+    assert sent==[["critical-one"]]
 def test_scan_202_completion_filters_export(client,monkeypatch):
     setups=client.get("/api/setups").json(); default=next(s for s in setups if s["name"]=="Default Setup"); client.post(f'/api/setups/{default["id"]}/activate')
     r=client.post("/api/scans"); assert r.status_code==202
