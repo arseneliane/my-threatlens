@@ -17,6 +17,7 @@ from .models import Setup, Scan, Finding, ChatMessage, SourceStatus, EmailAutoma
 from .services.collectors.fixtures import fixture_items
 from .services.collectors.rss import collect_source
 from .services.matching.engine import match_item
+from .services.matching.aliases import TECH_ALIASES, KEYWORD_ALIASES
 from .services.enrichment.core import extract_cves, severity, relevance
 from .services.imports.service import preview, sample_xlsx, sample_docx
 from .services.exports.excel import create_workbook
@@ -171,9 +172,11 @@ def scoped_findings(db,setup,params):
     technologies=set(setup.technologies); keywords=set(setup.keywords)
     requested_keyword=params.get("keyword"); requested_cve=(params.get("cve") or "").upper()
     rows=sorted(FINDINGS_CACHE.get(setup.id,[]),key=lambda f:utc_publication_date(f.publication_date),reverse=True)
+    all_technologies_selected=set(TECH_ALIASES).issubset(technologies)
+    all_keywords_selected=set(KEYWORD_ALIASES).issubset(keywords)
     matching=[f for f in rows
-            if technologies.intersection(f.matched_technologies or [f.technology])
-            and keywords.intersection(f.matched_keywords or [])
+            if (all_technologies_selected or technologies.intersection(f.matched_technologies or []))
+            and (all_keywords_selected or keywords.intersection(f.matched_keywords or []))
             and f.source in setup.sources and publication_in_setup_range(f.publication_date,setup)
             and (not params.get("severity") or f.severity==params["severity"])
             and (not params.get("technology") or f.technology==params["technology"])
@@ -405,6 +408,8 @@ async def run_scan(scan_id):
     collected=await asyncio.gather(*(collect_source(source,settings.request_timeout_seconds,settings.max_results_per_source,settings.live_collectors_enabled,scan_days) for source in sources))
     with SessionLocal() as db:
         setup=db.get(Setup,scan["setup_id"]); results=[]; added=0; added_in_range=0; scan_now=datetime.now(timezone.utc); live_sources=0; seen_fingerprints=set(); source_states=[]; zero_day_mentions=0; active_exploitation=0; critical_priority=0
+        all_technologies_selected=set(TECH_ALIASES).issubset(setup.technologies)
+        all_keywords_selected=set(KEYWORD_ALIASES).issubset(setup.keywords)
         for finding in result_cache.get(setup.id,[]): CHAT_CACHE.pop(finding.id,None)
         for idx,(source,(raw_items,collector_mode)) in enumerate(zip(sources,collected)):
             scan["message"]=f"Processing {source} ({collector_mode})"
@@ -412,12 +417,14 @@ async def run_scan(scan_id):
             source_states.append({"source":source,"status":"live" if is_live else ("fallback" if raw_items else "unavailable"),"reason":f"{len(raw_items)} items collected; {collector_mode}"})
             for raw in raw_items:
                 text=raw["title"]+" "+raw["summary"]; m=match_item(text,setup.technologies,ZERO_DAY_SCAN_KEYWORDS if zero_day_mode else setup.keywords)
+                if not zero_day_mode:
+                    m["relevant"]=(bool(m["technologies"]) or all_technologies_selected) and (bool(m["keywords"]) or all_keywords_selected)
                 if not m["relevant"]: continue
                 cves=extract_cves(text); sev,basis=severity(cvss=raw.get("cvss"),vendor=raw.get("vendor_severity"),kev=raw.get("kev",False),text=text); score,conf,reason=relevance(m["technology_score"],m["keyword_score"],raw.get("cvss"),raw.get("kev",False),text)
                 fp=hashlib.sha256(f'{raw["url"]}|{raw["title"]}|{raw["publication_date"].date()}'.encode()).hexdigest()
                 if fp in seen_fingerprints: continue
                 seen_fingerprints.add(fp)
-                finding=Finding(id=next(FINDING_IDS),setup_id=setup.id,scan_id=scan_id,fingerprint=fp,title=raw["title"],summary=raw["summary"],url=raw["url"],source=source,publication_date=raw["publication_date"],technology=m["technologies"][0],matched_technologies=m["technologies"],matched_keywords=m["keywords"],cves=cves,severity=sev,severity_basis=basis,cvss=raw.get("cvss"),epss=None,kev=raw.get("kev",False),ai_score=score,ai_confidence=conf,ai_reason=reason,evidence=m["evidence"],review_state="Open",notes="",checklist={})
+                finding=Finding(id=next(FINDING_IDS),setup_id=setup.id,scan_id=scan_id,fingerprint=fp,title=raw["title"],summary=raw["summary"],url=raw["url"],source=source,publication_date=raw["publication_date"],technology=m["technologies"][0] if m["technologies"] else "Other / General",matched_technologies=m["technologies"],matched_keywords=m["keywords"],cves=cves,severity=sev,severity_basis=basis,cvss=raw.get("cvss"),epss=None,kev=raw.get("kev",False),ai_score=score,ai_confidence=conf,ai_reason=reason,evidence=m["evidence"],review_state="Open",notes="",checklist={})
                 results.append(finding); added+=1
                 if publication_in_setup_range(raw["publication_date"],setup,scan_now):
                     added_in_range+=1

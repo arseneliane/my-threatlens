@@ -192,6 +192,17 @@ def test_scan_count_uses_selected_date_range(client):
     assert "no findings were published in the selected date range" in status["message"]
     assert status["metrics"]["excluded_by_date"]==2
 
+def test_selecting_entire_catalog_does_not_filter_out_unlisted_story_terms(client):
+    from app.services.matching.aliases import TECH_ALIASES, KEYWORD_ALIASES
+    client.post("/api/setups",json={"name":"Full Catalog","technologies":list(TECH_ALIASES),"keywords":list(KEYWORD_ALIASES),"sources":["The Hacker News"],"date_range":"7d"})
+    scan=client.post("/api/scans").json()
+    for _ in range(30):
+        status=client.get(f'/api/scans/{scan["scan_id"]}').json()
+        if status["status"]=="completed": break
+        time.sleep(.03)
+    assert status["findings_count"]==12
+    assert client.get("/api/findings").json()["total"]==12
+
 def test_zero_day_addon_scans_independently_of_regular_keywords(client):
     client.post("/api/setups",json={"name":"Zero-Day Watch","technologies":["Windows 11","Exchange Server"],"keywords":["SQL Injection"],"sources":["The Hacker News"],"date_range":"7d"})
     scan=client.post("/api/scans/zero-days")

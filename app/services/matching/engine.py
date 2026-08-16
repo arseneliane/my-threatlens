@@ -12,4 +12,3 @@ def match_item(text: str, technologies: list[str], keywords: list[str]):
             "technology_score": min(50, 35 + len(tech)*5) if tech else 0,
             "keyword_score": min(50, 35 + len(keys)*5) if keys else 0,
             "evidence": [f"{k}: {v[0]}" for k,v in {**tech, **keys}.items()][:8]}
-

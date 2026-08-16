@@ -57,7 +57,12 @@ def parse_hacker_news_homepage(content: bytes, limit: int) -> list[dict]:
         if not link or not title or not summary: continue
         url=link.get("href","")
         if not url.startswith("https://thehackernews.com/"): continue
-        items.append({"source":"The Hacker News","title":title.get_text(" ",strip=True),"summary":summary.get_text(" ",strip=True),"url":url,"publication_date":None,"cvss":None,"vendor_severity":None})
+        publication_date=None; date_node=card.select_one("span.h-datetime")
+        if date_node:
+            date_match=re.search(r"\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{1,2}, \d{4}\b",date_node.get_text(" ",strip=True))
+            if date_match:
+                publication_date=datetime.strptime(date_match.group(0),"%b %d, %Y").replace(hour=12,tzinfo=timezone(timedelta(hours=5,minutes=30)))
+        items.append({"source":"The Hacker News","title":title.get_text(" ",strip=True),"summary":summary.get_text(" ",strip=True),"url":url,"publication_date":publication_date,"cvss":None,"vendor_severity":None})
         if len(items)>=limit: break
     return items
 
@@ -76,7 +81,7 @@ async def _get_with_retry(client,url,**kwargs):
 async def _collect_hacker_news_homepage(client,limit):
     response=await _get_with_retry(client,"https://thehackernews.com/")
     candidates=parse_hacker_news_homepage(response.content,min(limit,20))
-    semaphore=asyncio.Semaphore(5)
+    semaphore=asyncio.Semaphore(10)
     async def enrich(item):
         try:
             async with semaphore:
@@ -120,16 +125,27 @@ async def collect_source(source: str, timeout: int, limit: int, live: bool=True,
     errors=[]
     async with httpx.AsyncClient(timeout=timeout,follow_redirects=True,max_redirects=3,headers=headers) as client:
         if source=="The Hacker News":
+            homepage_items=[]; feed_items=[]
             try:
-                items=await _collect_hacker_news_homepage(client,limit)
-                if items: return items,"live homepage"
+                homepage_items=await _collect_hacker_news_homepage(client,limit)
             except Exception as exc: errors.append(str(exc))
+            for url in SOURCE_FEEDS[source]:
+                try:
+                    response=await _get_with_retry(client,url)
+                    if len(response.content)>5_000_000: raise ValueError("Feed exceeded response-size limit")
+                    feed_items=parse_feed(response.content,source,limit)
+                    if feed_items: break
+                except Exception as exc: errors.append(str(exc))
+            combined=[]; seen_urls=set()
+            for item in [*homepage_items,*feed_items]:
+                if item["url"] not in seen_urls: seen_urls.add(item["url"]); combined.append(item)
+            if combined: return combined[:limit],"live homepage + feed"
         if source=="NVD":
             try:
                 items=await _collect_nvd(client,limit,days)
                 if items: return items,"live API"
             except Exception as exc: errors.append(str(exc))
-        for url in SOURCE_FEEDS.get(source,()):
+        for url in (() if source=="The Hacker News" else SOURCE_FEEDS.get(source,())):
             try:
                 response=await _get_with_retry(client,url)
                 if len(response.content)>5_000_000: raise ValueError("Feed exceeded response-size limit")
