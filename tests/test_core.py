@@ -9,6 +9,26 @@ from app.main import utc_publication_date
 from app.services.chat import clean_model_response, ollama_error_message, ollama_headers, site_system_prompt
 from app.services.collectors.fixtures import ITEMS
 from app.services.collectors.rss import SOURCE_FEEDS, parse_feed, parse_nvd, parse_hacker_news_homepage
+from app.services.auth import hash_password, normalize_username, session_token_hash, validate_password, validate_username, verify_password
+
+def test_account_credentials_are_validated_and_hashed():
+    assert validate_username("Arsen.Security") == "Arsen.Security"
+    assert normalize_username("  Arsen.Security ") == "arsen.security"
+    for bad in ("ab","9analyst","analyst email","a"*33):
+        try: validate_username(bad)
+        except ValueError: pass
+        else: raise AssertionError(f"Accepted invalid username: {bad}")
+    assert validate_password("Excellent-Pass9!","analyst") == "Excellent-Pass9!"
+    for weak in ("short","alllowercasepass9!","ALLUPPERCASEPASS9!","NoNumber-Pass!","NoSymbolPass99","Analyst-Good-Pass9!"):
+        try: validate_password(weak,"analyst")
+        except ValueError: pass
+        else: raise AssertionError(f"Accepted weak password: {weak}")
+    encoded=hash_password("Excellent-Pass9!")
+    assert encoded.startswith("pbkdf2_sha256$600000$")
+    assert "Excellent-Pass9!" not in encoded
+    assert verify_password("Excellent-Pass9!",encoded)
+    assert not verify_password("Wrong-Pass99!",encoded)
+    assert session_token_hash("token")!=session_token_hash("other-token")
 
 def test_alias_owa_exchange_and_keyword():
     m=match_item("Russian hackers exploit Microsoft OWA flaw allowing remote code execution",["Outlook Web Access","Exchange Server"],["Exploit","RCE"])

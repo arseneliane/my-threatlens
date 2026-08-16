@@ -3,7 +3,7 @@ tech:{"Operating Systems":["Windows 11","Windows Server 2019","Windows Server 20
 key:{"Vulnerabilities":["CVE","Zero-Day","Patch","Exploit","Security Advisory"],"Attack Techniques":["RCE","Privilege Escalation","Authentication Bypass","Lateral Movement","Command Injection","SQL Injection","XSS","SSRF","Directory Traversal"],"Threat Intelligence":["Active Exploitation","CISA KEV","CVSS","EPSS","Proof of Concept"],"Malware":["Ransomware","Malware","Trojan","Worm","Rootkit"],"Credential Attacks":["Password Spray","Credential Stuffing","MFA Bypass"]},
 source:{"Cybersecurity News":["The Hacker News","BleepingComputer","SecurityWeek"],"Government and Standards":["CISA","NVD","CVE.org"],"Vendor Advisories":["Microsoft MSRC","Ubuntu Security Notices","Red Hat Security Advisories","Fortinet PSIRT","Cisco Security Advisories","Palo Alto Unit 42"]}}
 let state={...initialSetup}, mode="", page=1, currentItems=[], zeroDayItems=[], biggestFinding=null, importData=null, allSetups=[], scopeDirty=false, selectedFindingIds=new Set(), selectionSetupId=null, selectorCustomValues=[];
-const WORKSPACE_CACHE_KEY="my-threatlens-browser-workspace-v1";
+const WORKSPACE_CACHE_KEY=`my-threatlens-account-workspace-v1:${String(window.currentUsername||"").toLowerCase()}`;
 let workspaceInstanceId=null;
 let setupSaveInFlight=null;
 let workspaceReady=Promise.resolve();

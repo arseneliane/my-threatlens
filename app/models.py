@@ -5,11 +5,27 @@ from .database import Base
 
 def now(): return datetime.now(timezone.utc)
 
+class User(Base):
+    __tablename__ = "users"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    username: Mapped[str] = mapped_column(String(32))
+    username_normalized: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(220))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+class UserSession(Base):
+    __tablename__ = "user_sessions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
 class Setup(Base):
     __tablename__ = "setups"
     id: Mapped[int] = mapped_column(primary_key=True)
     # `name` is an internal globally unique key. `display_name` is scoped to a
-    # browser workspace and is the only name exposed through the API.
+    # user account and is the only name exposed through the API.
     name: Mapped[str] = mapped_column(String(220), unique=True)
     display_name: Mapped[str] = mapped_column(String(120), default="Default Setup", index=True)
     owner_id: Mapped[str] = mapped_column(String(64), default="legacy", index=True)

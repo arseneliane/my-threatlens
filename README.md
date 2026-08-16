@@ -15,6 +15,7 @@ The application normalizes approved-source items, recognizes product and attack 
 ## 4. Key Capabilities
 
 - Named setup creation, loading, saving, duplication, search, and deletion
+- Username-only registration and account-isolated workspaces (no email required)
 - XLSX and DOCX setup preview/import
 - Non-blocking scans with progress and failure-safe behavior
 - Alias-aware technology-and-keyword matching
@@ -29,7 +30,7 @@ Collectors feed a normalization and enrichment pipeline. A finding is retained o
 
 ## 6. Privacy and Security
 
-Each browser receives an anonymous workspace cookie, so setup changes made on one browser or device do not affect another. The browser also keeps a local backup of setup configuration and restores it after a temporary hosted server restart. Findings, scans, reviews, and chat messages are not placed in browser storage and remain temporary. Clearing site data or using private browsing creates a new workspace. SMTP credentials are read only from the local `.env` file and are never sent to the browser. There are no user accounts or analytics.
+Each user registers a case-insensitively unique username and a strong password; no email address is collected. Passwords are stored as salted PBKDF2-SHA256 hashes, and opaque login sessions are stored only as hashes. Setups belong to the signed-in account, so one user's changes do not affect another. The browser keeps a username-scoped local backup of setup configuration for recovery. Findings, scans, reviews, and chat messages are not placed in browser storage and remain temporary. SMTP and AI credentials remain in server environment settings and are never sent to the browser.
 
 ### Email setup
 
@@ -46,7 +47,7 @@ Copy-Item .env.example .env
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8001
 ```
 
-Open http://127.0.0.1:8001.
+Open http://127.0.0.1:8001, register a username and strong password, then create as many independent monitoring setups as needed.
 
 ## 8. Typical Analyst Workflow
 

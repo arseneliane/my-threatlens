@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="/static/app.css">
   <link rel="stylesheet" href="/static/brand.css">
   <link rel="stylesheet" href="/static/sidebar.css">
+  <link rel="stylesheet" href="/static/account.css">
   <link rel="stylesheet" href="/static/site-chat.css">
 </head>
 <body>
@@ -25,6 +26,11 @@
       <a class="button sidebar-save" href="/"><span class="nav-icon" aria-hidden="true">⌂</span><span>Dashboard</span></a>
       <a class="button active-nav" href="/about" aria-current="page"><span class="nav-icon" aria-hidden="true">ⓘ</span><span>About</span></a>
     </nav>
+    <div class="account-panel">
+      <span class="account-label">Signed in as</span>
+      <span class="account-user" title="{{ username }}">{{ username }}</span>
+      <form class="logout-form" method="post" action="/logout"><button class="logout-button" type="submit">Log out</button></form>
+    </div>
   </aside>
   <main class="about">
     <h2>What My ThreatLens does</h2>
@@ -40,13 +46,13 @@
       <li><strong>Share the result:</strong> Export downloads the currently filtered findings as an Excel workbook. Email sends the filtered report only when the site owner has configured an SMTP mail account.</li>
     </ol>
     <p><a class="button primary" href="/">Open the Dashboard</a></p>
-    <h2>Browser workspace and saved data</h2>
-    <p>Each browser has its own independent workspace. Changes on your laptop do not change your supervisor's setup in another browser or on another computer. Setup configuration is backed up in that browser so it can be restored after a temporary hosted-server restart. Clearing site data or using a private window starts a new workspace.</p>
-    <p>Findings, review state, and chat messages are temporary and are not saved in browser storage.</p>
+    <h2>Accounts, setups, and saved data</h2>
+    <p>Each username has an independent workspace and can create multiple saved setups. Changes in your account do not change another user's setups, even when both people use the same computer.</p>
+    <p>Setup configuration also has an account-specific browser backup that can help restore it after a temporary hosted-server restart. Findings, review state, and chat messages are temporary and are not saved in browser storage.</p>
     <h2>Email delivery</h2>
     <p>Email is optional and must be connected by the site owner through the Zoho Mail API or an available SMTP provider. Until then, use Export and attach the generated Excel report through an approved company channel.</p>
     <h2>Data privacy</h2>
-    <p>The demonstration uses a shared login only to restrict access to the site. It has no personal user accounts or analytics. Passwords and SMTP secrets stay in server environment settings and are never stored in the browser workspace.</p>
+    <p>My ThreatLens does not require an email address. Usernames are unique, passwords are stored only as strong one-way hashes, and login sessions use protected browser cookies. SMTP and AI provider secrets stay in server environment settings and are never exposed to users.</p>
     <h2>Sources</h2>
     <p>The application is designed for approved government, vendor, and cybersecurity news feeds. The included offline fixture collector keeps tests deterministic.</p>
     <h2>AI disclosure</h2>

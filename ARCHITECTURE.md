@@ -1,4 +1,3 @@
 # Architecture
 
-FastAPI owns HTTP routes and background jobs; Jinja2 renders a no-build shell; vanilla JavaScript manages selectors, polling, filters, review state, and imports. SQLAlchemy 2 maps setups, scans, findings, source statuses, chats, and audit events to SQLite (or a PostgreSQL URL). Services isolate matching, enrichment, collection, import, export, and chat behavior. SQLite enables WAL, foreign keys, and a busy timeout. Stable setup-scoped fingerprints prevent duplicates.
-
+FastAPI owns HTTP routes, account sessions, and background jobs; Jinja2 renders a no-build shell; vanilla JavaScript manages selectors, polling, filters, review state, and imports. SQLAlchemy 2 maps users, hashed sessions, account-owned setups, scans, findings, source statuses, chats, and audit events to SQLite (or a PostgreSQL URL). Services isolate authentication, matching, enrichment, collection, import, export, and chat behavior. Passwords use salted PBKDF2-SHA256, browser cookies hold opaque session tokens, and the database stores only their SHA-256 hashes. SQLite enables WAL, foreign keys, and a busy timeout. Stable setup-scoped fingerprints prevent duplicates.

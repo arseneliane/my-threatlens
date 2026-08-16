@@ -13,9 +13,7 @@ class Settings(BaseSettings):
     results_page_size: int = 50
     max_upload_bytes: int = 5 * 1024 * 1024
     live_collectors_enabled: bool = True
-    require_demo_auth: bool = False
-    demo_username: str = ""
-    demo_password: str = ""
+    secure_cookies: bool = False
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_username: str = ""

@@ -1,12 +1,12 @@
 import time
-import base64
+import uuid
 from datetime import datetime, timezone
 from io import BytesIO
 from types import SimpleNamespace
 from openpyxl import load_workbook
 def test_home_active_name(client):
     r=client.get("/"); assert r.status_code==200 and "Default Setup" in r.text
-    assert f'{client.cookies.get("threatlens_client")}:' not in r.text
+    assert f'user:' not in r.text and client.test_username in r.text
     assert "Last 90 days" in r.text and "Custom range" in r.text
     assert "Publication Date &amp; Time" in r.text
     js=client.get("/static/app.js"); assert "function renderImportPreview()" in js.text
@@ -53,6 +53,7 @@ def test_home_active_name(client):
     assert "/?open=setups" in about.text and "/?open=import" in about.text
     assert "How to use the website" in about.text and "Define your scope" in about.text
     assert "AI-assisted summaries" in about.text and "independent workspace" in about.text
+    assert "does not require an email address" in about.text and "one-way hashes" in about.text
     assert "Arsen Eliane" in about.text and "ChatGPT" in about.text and "internship project" in about.text
     assert "Alfa" not in about.text and "Information Security Department" not in about.text
     assert 'new URLSearchParams(location.search).get("open")' in js.text
@@ -63,33 +64,53 @@ def test_home_active_name(client):
     assert "Your additions" in js.text and "function addCustomOption()" in js.text and "function removeCustomOption(value)" in js.text
     assert 'class="manual-option-chip"' in js.text and client.get("/static/selector-custom.css").status_code==200
 
-def test_hosted_demo_authentication(client,monkeypatch):
-    from app.config import settings
-    monkeypatch.setattr(settings,"require_demo_auth",True)
-    monkeypatch.setattr(settings,"demo_username","supervisor")
-    monkeypatch.setattr(settings,"demo_password","correct-horse-battery-staple")
-    denied=client.get("/")
-    assert denied.status_code==401 and denied.headers["www-authenticate"].startswith("Basic")
-    assert client.get("/healthz").status_code==200
-    token=base64.b64encode(b"supervisor:correct-horse-battery-staple").decode()
-    allowed=client.get("/",headers={"Authorization":f"Basic {token}"})
-    assert allowed.status_code==200 and allowed.headers["x-frame-options"]=="DENY"
+def test_account_registration_login_and_logout(client):
+    from fastapi.testclient import TestClient
+    username=f"account_{uuid.uuid4().hex[:10]}"
+    with TestClient(client.app) as visitor:
+        denied=visitor.get("/",follow_redirects=False)
+        assert denied.status_code==303 and denied.headers["location"].startswith("/login")
+        assert visitor.get("/api/setups").status_code==401
+        assert visitor.get("/healthz").status_code==200
+        login=visitor.get("/login")
+        assert login.status_code==200 and "Every security headline" in login.text
+        assert "never asks for your email address" in login.text
+        weak=visitor.post("/register",data={"username":username,"password":"weak","password_confirm":"weak"})
+        assert weak.status_code==422 and "at least 12 characters" in weak.text
+        registered=visitor.post("/register",data={"username":username,"password":"Excellent-Pass9!","password_confirm":"Excellent-Pass9!"},follow_redirects=False)
+        assert registered.status_code==303 and visitor.cookies.get("mythreatlens_session")
+        allowed=visitor.get("/")
+        assert allowed.status_code==200 and username in allowed.text and allowed.headers["x-frame-options"]=="DENY"
+        logged_out=visitor.post("/logout",follow_redirects=False)
+        assert logged_out.status_code==303 and logged_out.headers["location"]=="/login"
+        assert visitor.get("/",follow_redirects=False).status_code==303
+        wrong=visitor.post("/login",data={"username":username,"password":"Wrong-Pass99!"})
+        assert wrong.status_code==401 and "incorrect" in wrong.text
+        correct=visitor.post("/login",data={"username":username.upper(),"password":"Excellent-Pass9!"},follow_redirects=False)
+        assert correct.status_code==303
+    with TestClient(client.app) as duplicate:
+        response=duplicate.post("/register",data={"username":username.upper(),"password":"Another-Good-Pass8!","password_confirm":"Another-Good-Pass8!"})
+        assert response.status_code==409 and "already taken" in response.text
 
 def test_browser_workspaces_are_isolated_and_locally_backed_up(client):
     from fastapi.testclient import TestClient
     with TestClient(client.app) as second:
+        second_username=f"second_{uuid.uuid4().hex[:10]}"
+        registered=second.post("/register",data={"username":second_username,"password":"Strong-Second-Pass8!","password_confirm":"Strong-Second-Pass8!"},follow_redirects=False)
+        assert registered.status_code==303
         assert client.get("/").status_code==200 and second.get("/").status_code==200
         created=client.post("/api/setups",json={"name":"Laptop Only","technologies":["Windows 11"],"keywords":["CVE"],"sources":["CISA"],"date_range":"7d"})
         assert created.status_code==201
         assert "Laptop Only" in [setup["name"] for setup in client.get("/api/setups").json()]
         assert "Laptop Only" not in [setup["name"] for setup in second.get("/api/setups").json()]
-        assert client.cookies.get("threatlens_client")!=second.cookies.get("threatlens_client")
+        assert client.cookies.get("mythreatlens_session")!=second.cookies.get("mythreatlens_session")
         workspace=client.get("/api/workspace").json()
         restored=second.post("/api/workspace/restore",json={"setups":[{"name":"Recovered Setup","technologies":["Windows 11"],"keywords":["CVE"],"sources":["CISA"],"date_range":"7d"}],"active_name":"Recovered Setup"})
         assert restored.status_code==200 and restored.json()["active"]["name"]=="Recovered Setup"
         assert workspace["instance_id"]==restored.json()["instance_id"]
     js=client.get("/static/app.js").text
     assert "localStorage.setItem(WORKSPACE_CACHE_KEY" in js and 'fetch("/api/workspace/restore"' in js
+    assert "my-threatlens-account-workspace-v1" in js and "window.currentUsername" in js
 def test_custom_date_range_persists(client):
     data={"name":"Custom Dates","technologies":[],"keywords":[],"sources":[],"date_range":"custom","start_date":"2026-06-01","end_date":"2026-07-30"}
     created=client.post("/api/setups",json=data); assert created.status_code==201

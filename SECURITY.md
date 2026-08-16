@@ -2,7 +2,7 @@
 
 The default build makes no arbitrary outbound requests. Uploads accept only `.xlsx` and `.docx`, enforce a 5 MB limit, and are parsed in memory without macro execution. Excel export escapes formula-leading values. HTML is escaped by Jinja2 or client-side encoding.
 
-Internet-hosted demonstrations must set `REQUIRE_DEMO_AUTH=true`, a non-empty `DEMO_USERNAME`, and a unique `DEMO_PASSWORD` of at least 12 characters. The application refuses to start when hosted-demo authentication is enabled without valid credentials. Do not deploy `.env`, SMTP credentials, or the local SQLite database.
+Internet-hosted deployments always require an account session. Each user registers a unique username and a password of at least 12 characters containing uppercase and lowercase letters, a number, and a symbol. Passwords are stored as salted PBKDF2-SHA256 hashes, and session tokens are stored only as SHA-256 hashes. Set `SECURE_COOKIES=true` behind HTTPS, use a persistent database, and do not deploy `.env`, SMTP credentials, AI keys, or the local SQLite database.
 
 Browser workspaces are separated by a random, HTTP-only, same-site cookie. Setup configuration is also backed up in that browser's `localStorage` so it can be restored after temporary Render storage is reset. Findings, review notes, chat messages, credentials, and authentication secrets are never written to `localStorage`. This is convenient isolation for a demonstration, not identity-based authorization for a production multi-user system.
 

@@ -1,4 +1,4 @@
-import os, tempfile
+import os, tempfile, uuid
 _db_path=os.path.join(tempfile.gettempdir(),"my_threatlens_test.db")
 try: os.remove(_db_path)
 except FileNotFoundError: pass
@@ -10,4 +10,9 @@ from app.main import app
 
 @pytest.fixture
 def client():
-    with TestClient(app) as c: yield c
+    with TestClient(app) as c:
+        username=f"tester_{uuid.uuid4().hex[:10]}"
+        response=c.post("/register",data={"username":username,"password":"Strong-Test-Pass9!","password_confirm":"Strong-Test-Pass9!","next":"/"},follow_redirects=False)
+        assert response.status_code==303
+        c.test_username=username
+        yield c

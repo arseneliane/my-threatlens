@@ -6,7 +6,7 @@ Local deployment remains the default: Windows, Python 3.11+, `127.0.0.1:8001`. C
 
 ## Password-protected Render demo
 
-The repository includes `render.yaml` for a free supervisor demonstration. Create a private Git repository, connect it to Render as a Blueprint, and provide `DEMO_USERNAME` and a unique `DEMO_PASSWORD` of at least 12 characters when prompted. Never add the password to this repository.
+The repository includes `render.yaml` for a hosted supervisor demonstration. Create a private Git repository, connect it to Render, and configure a persistent `DATABASE_URL` so registered accounts and setups survive restarts. Account login is built in: each person registers a unique username and strong password without an email address. Never add passwords or provider secrets to this repository.
 
 The free service uses temporary SQLite storage. Each browser is isolated by an anonymous workspace cookie and keeps a local backup of its setup configuration; after Render restarts or redeploys, the browser restores those setups automatically. Clearing cookies/site data or using a private window starts a new workspace. Findings and review activity are still temporary, so this remains suitable for evaluation only, not production or durable collaboration. SMTP credentials and the local `.env` file are intentionally not deployed.
 

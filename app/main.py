@@ -1,19 +1,20 @@
-import asyncio, base64, binascii, hashlib, itertools, math, re, secrets, smtplib, uuid
+import asyncio, hashlib, itertools, math, re, secrets, smtplib, uuid
 from datetime import date, datetime, timezone, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form, Request, BackgroundTasks
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from sqlalchemy import delete as sql_delete, select, func, update, and_, inspect
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from .config import settings
 from .database import Base, engine, get_db, SessionLocal
-from .models import Setup, Scan, Finding, ChatMessage, SourceStatus, EmailAutomation
+from .models import Setup, Scan, Finding, ChatMessage, SourceStatus, EmailAutomation, User, UserSession
 from .services.collectors.fixtures import fixture_items
 from .services.collectors.rss import collect_source
 from .services.matching.engine import match_item
@@ -23,6 +24,7 @@ from .services.imports.service import preview, sample_xlsx, sample_docx
 from .services.exports.excel import create_workbook
 from .services.chat import answer, ollama_answer, ollama_site_answer
 from .services.email import send_findings_email, EmailDeliveryError, EMAIL_PATTERN
+from .services.auth import hash_password, new_session_token, normalize_username, session_token_hash, validate_password, validate_username, verify_password
 
 ROOT=Path(__file__).parent
 app=FastAPI(title="My ThreatLens",version="1.0.0")
@@ -36,40 +38,42 @@ SITE_CHAT_CACHE={}
 FINDING_IDS=itertools.count(1)
 SCAN_IDS=itertools.count(1)
 INSTANCE_ID=str(uuid.uuid4())
-CLIENT_COOKIE="threatlens_client"
+SESSION_COOKIE="mythreatlens_session"
+SESSION_DAYS=30
 ZERO_DAY_SCAN_KEYWORDS=["Zero-Day","Active Exploitation","Exploit","CISA KEV","Proof of Concept"]
 AUTOMATIC_EMAIL_STATUS={"enabled":False,"last_daily_sent_at":None,"last_critical_sent_at":None,"last_error":None}
 AUTOMATICALLY_ALERTED_FINGERPRINTS=set()
 AUTOMATION_SCHEDULER=None
 
 @app.middleware("http")
-async def protect_hosted_demo(request:Request,call_next):
-    """Require HTTP Basic authentication when the hosted-demo flag is enabled."""
-    client_id=request.cookies.get(CLIENT_COOKIE,"")
-    new_client=not re.fullmatch(r"[A-Za-z0-9_-]{32,64}",client_id)
-    if new_client: client_id=secrets.token_urlsafe(32)
-    request.state.client_id=client_id
-    if settings.require_demo_auth and request.url.path!="/healthz":
-        authorized=False
-        authorization=request.headers.get("authorization","")
-        scheme,_,encoded=authorization.partition(" ")
-        if scheme.lower()=="basic" and encoded:
-            try:
-                username,separator,password=base64.b64decode(encoded,validate=True).decode("utf-8").partition(":")
-                authorized=bool(separator) and secrets.compare_digest(username,settings.demo_username) and secrets.compare_digest(password,settings.demo_password)
-            except (binascii.Error,UnicodeDecodeError,ValueError):
-                pass
-        if not authorized:
-            response=Response(
-                "Authentication required.",
-                status_code=401,
-                media_type="text/plain",
-                headers={"WWW-Authenticate":'Basic realm="My ThreatLens supervisor demo"',"Cache-Control":"no-store"},
-            )
-        else: response=await call_next(request)
+async def require_account(request:Request,call_next):
+    """Resolve a hashed database session and require it outside public routes."""
+    request.state.user=None; request.state.client_id=None
+    token=request.cookies.get(SESSION_COOKIE,"")
+    invalid_token=False
+    if token:
+        with SessionLocal() as db:
+            session=db.scalar(select(UserSession).where(UserSession.token_hash==session_token_hash(token)))
+            now=datetime.now(timezone.utc)
+            expires=session.expires_at if session else None
+            if expires and expires.tzinfo is None: expires=expires.replace(tzinfo=timezone.utc)
+            if session and expires>now:
+                user=db.get(User,session.user_id)
+                if user:
+                    request.state.user={"id":user.id,"username":user.username}
+                    request.state.client_id=f"user:{user.id}"
+            elif session:
+                db.delete(session); db.commit()
+            if request.state.user is None: invalid_token=True
+    public=request.url.path in {"/login","/register","/healthz"} or request.url.path.startswith("/static/")
+    if not public and request.state.user is None:
+        if request.url.path.startswith("/api/"):
+            response=JSONResponse(status_code=401,content={"detail":"Log in to continue."})
+        else:
+            target=request.url.path if request.url.path.startswith("/") and not request.url.path.startswith("//") else "/"
+            response=RedirectResponse(f"/login?next={target}",status_code=303)
     else: response=await call_next(request)
-    if new_client:
-        response.set_cookie(CLIENT_COOKIE,client_id,max_age=31_536_000,httponly=True,secure=settings.require_demo_auth,samesite="strict")
+    if invalid_token: response.delete_cookie(SESSION_COOKIE,path="/")
     response.headers.setdefault("X-Content-Type-Options","nosniff")
     response.headers.setdefault("X-Frame-Options","DENY")
     response.headers.setdefault("Referrer-Policy","strict-origin-when-cross-origin")
@@ -284,8 +288,6 @@ async def startup():
                 if "owner_id" not in columns: conn.exec_driver_sql("ALTER TABLE setups ADD COLUMN owner_id VARCHAR(64)")
                 conn.exec_driver_sql("UPDATE setups SET display_name=name WHERE display_name IS NULL OR display_name='' ")
                 conn.exec_driver_sql("UPDATE setups SET owner_id='legacy' WHERE owner_id IS NULL OR owner_id='' ")
-    if settings.require_demo_auth and (not settings.demo_username or len(settings.demo_password)<12):
-        raise RuntimeError("Hosted demo authentication requires DEMO_USERNAME and a DEMO_PASSWORD of at least 12 characters.")
     Base.metadata.create_all(engine)
     if settings.database_url.startswith("sqlite"):
         with engine.begin() as conn:
@@ -315,19 +317,79 @@ async def errors(request, exc):
     cid=str(uuid.uuid4())
     return JSONResponse(status_code=500,content={"detail":f"The request could not be completed. Correlation ID: {cid}. Please retry."})
 
+def safe_next(value):
+    return value if value and value.startswith("/") and not value.startswith("//") else "/"
+
+def auth_template(request,mode,error="",username="",next_path="/",status_code=200):
+    return templates.TemplateResponse(request,"auth.html",{"mode":mode,"error":error,"username":username,"next_path":safe_next(next_path)},status_code=status_code)
+
+def create_user_session(db,user):
+    token=new_session_token()
+    db.add(UserSession(user_id=user.id,token_hash=session_token_hash(token),expires_at=datetime.now(timezone.utc)+timedelta(days=SESSION_DAYS)))
+    db.commit()
+    return token
+
+def set_session_cookie(response,request,token):
+    response.set_cookie(SESSION_COOKIE,token,max_age=SESSION_DAYS*86400,httponly=True,secure=settings.secure_cookies or request.url.scheme=="https",samesite="strict",path="/")
+
+@app.get("/login",response_class=HTMLResponse,include_in_schema=False)
+def login_page(request:Request,next:str="/"):
+    if request.state.user: return RedirectResponse(safe_next(next),status_code=303)
+    return auth_template(request,"login",next_path=next)
+
+@app.post("/login",response_class=HTMLResponse,include_in_schema=False)
+def login(request:Request,username:str=Form(...),password:str=Form(...),next:str=Form("/"),db:Session=Depends(get_db)):
+    normalized=normalize_username(username)
+    user=db.scalar(select(User).where(User.username_normalized==normalized))
+    if not user or not verify_password(password,user.password_hash):
+        return auth_template(request,"login","The username or password is incorrect.",username,next,401)
+    token=create_user_session(db,user)
+    response=RedirectResponse(safe_next(next),status_code=303); set_session_cookie(response,request,token); return response
+
+@app.get("/register",response_class=HTMLResponse,include_in_schema=False)
+def register_page(request:Request,next:str="/"):
+    if request.state.user: return RedirectResponse(safe_next(next),status_code=303)
+    return auth_template(request,"register",next_path=next)
+
+@app.post("/register",response_class=HTMLResponse,include_in_schema=False)
+def register(request:Request,username:str=Form(...),password:str=Form(...),password_confirm:str=Form(...),next:str=Form("/"),db:Session=Depends(get_db)):
+    try:
+        clean_username=validate_username(username)
+        validate_password(password,clean_username)
+        if password!=password_confirm: raise ValueError("The password confirmation does not match.")
+    except ValueError as exc:
+        return auth_template(request,"register",str(exc),username,next,422)
+    normalized=normalize_username(clean_username)
+    if db.scalar(select(User).where(User.username_normalized==normalized)):
+        return auth_template(request,"register","That username is already taken.",username,next,409)
+    user=User(username=clean_username,username_normalized=normalized,password_hash=hash_password(password)); db.add(user)
+    try: db.flush()
+    except IntegrityError:
+        db.rollback(); return auth_template(request,"register","That username is already taken.",username,next,409)
+    token=create_user_session(db,user)
+    response=RedirectResponse(safe_next(next),status_code=303); set_session_cookie(response,request,token); return response
+
+@app.post("/logout",include_in_schema=False)
+def logout(request:Request,db:Session=Depends(get_db)):
+    token=request.cookies.get(SESSION_COOKIE,"")
+    if token:
+        session=db.scalar(select(UserSession).where(UserSession.token_hash==session_token_hash(token)))
+        if session: db.delete(session); db.commit()
+    response=RedirectResponse("/login",status_code=303); response.delete_cookie(SESSION_COOKIE,path="/"); return response
+
 @app.get("/",response_class=HTMLResponse)
 def home(request:Request,db:Session=Depends(get_db)):
     active=ensure_workspace(db,request.state.client_id)
-    return templates.TemplateResponse(request,"index.html",{"active":active,"scan_interval_seconds":settings.scan_interval_seconds})
+    return templates.TemplateResponse(request,"index.html",{"active":active,"username":request.state.user["username"],"scan_interval_seconds":settings.scan_interval_seconds})
 @app.get("/healthz",include_in_schema=False)
 def healthz(): return {"status":"ok"}
 @app.get("/about",response_class=HTMLResponse)
-def about(request:Request): return templates.TemplateResponse(request,"about.html",{"version":"1.0.0"})
+def about(request:Request): return templates.TemplateResponse(request,"about.html",{"version":"1.0.0","username":request.state.user["username"]})
 @app.get("/api/workspace")
 def workspace(request:Request,db:Session=Depends(get_db)):
     active=ensure_workspace(db,request.state.client_id)
     rows=db.scalars(select(Setup).where(Setup.owner_id==request.state.client_id).order_by(Setup.display_name)).all()
-    return {"instance_id":INSTANCE_ID,"active":serial_setup(active),"setups":[serial_setup(s) for s in rows]}
+    return {"instance_id":INSTANCE_ID,"username":request.state.user["username"],"active":serial_setup(active),"setups":[serial_setup(s) for s in rows]}
 @app.post("/api/workspace/restore")
 def restore_workspace(data:WorkspaceRestore,request:Request,db:Session=Depends(get_db)):
     owner=request.state.client_id
