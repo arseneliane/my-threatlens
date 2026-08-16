@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>{{ "Create account" if mode == "register" else "Log in" }} · My ThreatLens</title>
+  <title>Log in · My ThreatLens</title>
   <link rel="icon" type="image/png" href="/static/my-threatlens-logo.png">
   <link rel="stylesheet" href="/static/auth.css">
 </head>
@@ -17,7 +17,7 @@
         <p class="intro-copy">Turn public threat news into a focused monitoring workspace built around the technologies and risks that matter to you.</p>
         <ul class="benefits">
           <li><span aria-hidden="true">✓</span> Create and manage multiple monitoring setups</li>
-          <li><span aria-hidden="true">✓</span> Keep every account's workspace independent</li>
+          <li><span aria-hidden="true">✓</span> Keep every browser's workspace independent</li>
           <li><span aria-hidden="true">✓</span> Review, export, and email relevant threats</li>
         </ul>
       </div>
@@ -26,54 +26,31 @@
 
     <section class="auth-panel" aria-labelledby="form-title">
       <div class="auth-card">
-        <div class="mode-switch" aria-label="Account access">
-          <a href="/login?next={{ next_path|urlencode }}" class="{{ 'active' if mode == 'login' else '' }}"{% if mode == 'login' %} aria-current="page"{% endif %}>Log in</a>
-          <a href="/register?next={{ next_path|urlencode }}" class="{{ 'active' if mode == 'register' else '' }}"{% if mode == 'register' %} aria-current="page"{% endif %}>Register</a>
-        </div>
-
-        {% if mode == "register" %}
-          <p class="form-kicker">Start your workspace</p>
-          <h2 id="form-title">Create your account</h2>
-          <p class="form-intro">No email is needed. Choose a unique username and a strong password.</p>
-        {% else %}
-          <p class="form-kicker">Welcome back</p>
-          <h2 id="form-title">Log in to My ThreatLens</h2>
-          <p class="form-intro">Open your personal monitoring setups and findings workspace.</p>
-        {% endif %}
+        <p class="form-kicker">Welcome back</p>
+        <h2 id="form-title">Log in to My ThreatLens</h2>
+        <p class="form-intro">Enter the demonstration username and password to open your independent monitoring workspace.</p>
 
         {% if error %}<div class="auth-error" role="alert">{{ error }}</div>{% endif %}
 
-        <form method="post" action="/{{ mode }}" class="auth-form">
+        <form method="post" action="/login" class="auth-form">
           <input type="hidden" name="next" value="{{ next_path }}">
           <label for="username">Username</label>
-          <input id="username" name="username" value="{{ username }}" minlength="3" maxlength="32" pattern="[A-Za-z][A-Za-z0-9_.-]{2,31}" autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus placeholder="e.g. arsen.security">
-          {% if mode == "register" %}<small>3–32 characters. Start with a letter; use letters, numbers, dots, hyphens, or underscores.</small>{% endif %}
+          <input id="username" name="username" value="{{ username }}" autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus placeholder="Enter username">
 
           <label for="password">Password</label>
           <div class="password-field">
-            <input id="password" name="password" type="password" minlength="12" maxlength="128" autocomplete="{{ 'new-password' if mode == 'register' else 'current-password' }}" required placeholder="Enter your password">
-            <button type="button" class="show-password" onclick="togglePassword()" aria-controls="password{% if mode == 'register' %} password_confirm{% endif %}" aria-pressed="false">Show</button>
+            <input id="password" name="password" type="password" autocomplete="current-password" required placeholder="Enter your password">
+            <button type="button" class="show-password" onclick="togglePassword()" aria-controls="password" aria-pressed="false">Show</button>
           </div>
-          {% if mode == "register" %}<small>At least 12 characters with uppercase, lowercase, a number, and a symbol.</small>{% endif %}
-
-          {% if mode == "register" %}
-            <label for="password_confirm">Confirm password</label>
-            <input id="password_confirm" name="password_confirm" type="password" minlength="12" maxlength="128" autocomplete="new-password" required placeholder="Enter it again">
-          {% endif %}
-
-          <button class="submit-button" type="submit">{{ "Create account" if mode == "register" else "Log in" }}</button>
+          <button class="submit-button" type="submit">Log in</button>
         </form>
-
-        <p class="auth-alternate">
-          {% if mode == "register" %}Already have an account? <a href="/login?next={{ next_path|urlencode }}">Log in</a>{% else %}New to My ThreatLens? <a href="/register?next={{ next_path|urlencode }}">Create an account</a>{% endif %}
-        </p>
-        <p class="privacy-note">Your password is securely hashed. My ThreatLens never asks for your email address.</p>
+        <p class="privacy-note">Each browser keeps a separate workspace, even when the same demonstration login is used.</p>
       </div>
     </section>
   </main>
   <script>
     function togglePassword(){
-      const inputs=[document.getElementById("password"),document.getElementById("password_confirm")].filter(Boolean);
+      const inputs=[document.getElementById("password")];
       const show=inputs[0].type==="password";
       inputs.forEach(input=>input.type=show?"text":"password");
       const button=document.querySelector(".show-password");

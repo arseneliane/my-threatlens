@@ -1,5 +1,4 @@
 import time
-import uuid
 from datetime import datetime, timezone
 from io import BytesIO
 from types import SimpleNamespace
@@ -53,7 +52,7 @@ def test_home_active_name(client):
     assert "/?open=setups" in about.text and "/?open=import" in about.text
     assert "How to use the website" in about.text and "Define your scope" in about.text
     assert "AI-assisted summaries" in about.text and "independent workspace" in about.text
-    assert "does not require an email address" in about.text and "one-way hashes" in about.text
+    assert "does not collect user email addresses" in about.text and "one-way hash" in about.text
     assert "Arsen Eliane" in about.text and "ChatGPT" in about.text and "internship project" in about.text
     assert "Alfa" not in about.text and "Information Security Department" not in about.text
     assert 'new URLSearchParams(location.search).get("open")' in js.text
@@ -64,9 +63,8 @@ def test_home_active_name(client):
     assert "Your additions" in js.text and "function addCustomOption()" in js.text and "function removeCustomOption(value)" in js.text
     assert 'class="manual-option-chip"' in js.text and client.get("/static/selector-custom.css").status_code==200
 
-def test_account_registration_login_and_logout(client):
+def test_shared_login_and_logout(client):
     from fastapi.testclient import TestClient
-    username=f"account_{uuid.uuid4().hex[:10]}"
     with TestClient(client.app) as visitor:
         denied=visitor.get("/",follow_redirects=False)
         assert denied.status_code==303 and denied.headers["location"].startswith("/login")
@@ -74,30 +72,24 @@ def test_account_registration_login_and_logout(client):
         assert visitor.get("/healthz").status_code==200
         login=visitor.get("/login")
         assert login.status_code==200 and "Every security headline" in login.text
-        assert "never asks for your email address" in login.text
-        weak=visitor.post("/register",data={"username":username,"password":"weak","password_confirm":"weak"})
-        assert weak.status_code==422 and "at least 12 characters" in weak.text
-        registered=visitor.post("/register",data={"username":username,"password":"Excellent-Pass9!","password_confirm":"Excellent-Pass9!"},follow_redirects=False)
-        assert registered.status_code==303 and visitor.cookies.get("mythreatlens_session")
+        assert "Each browser keeps a separate workspace" in login.text
+        assert "Register" not in login.text
+        assert visitor.get("/register",follow_redirects=False).status_code==303
+        wrong=visitor.post("/login",data={"username":"cyber expert","password":"wrong"})
+        assert wrong.status_code==401 and "incorrect" in wrong.text
+        correct=visitor.post("/login",data={"username":"CYBER EXPERT","password":"test-only-password"},follow_redirects=False)
+        assert correct.status_code==303 and visitor.cookies.get("mythreatlens_session")
         allowed=visitor.get("/")
-        assert allowed.status_code==200 and username in allowed.text and allowed.headers["x-frame-options"]=="DENY"
+        assert allowed.status_code==200 and "cyber expert" in allowed.text and allowed.headers["x-frame-options"]=="DENY"
         logged_out=visitor.post("/logout",follow_redirects=False)
         assert logged_out.status_code==303 and logged_out.headers["location"]=="/login"
         assert visitor.get("/",follow_redirects=False).status_code==303
-        wrong=visitor.post("/login",data={"username":username,"password":"Wrong-Pass99!"})
-        assert wrong.status_code==401 and "incorrect" in wrong.text
-        correct=visitor.post("/login",data={"username":username.upper(),"password":"Excellent-Pass9!"},follow_redirects=False)
-        assert correct.status_code==303
-    with TestClient(client.app) as duplicate:
-        response=duplicate.post("/register",data={"username":username.upper(),"password":"Another-Good-Pass8!","password_confirm":"Another-Good-Pass8!"})
-        assert response.status_code==409 and "already taken" in response.text
 
 def test_browser_workspaces_are_isolated_and_locally_backed_up(client):
     from fastapi.testclient import TestClient
     with TestClient(client.app) as second:
-        second_username=f"second_{uuid.uuid4().hex[:10]}"
-        registered=second.post("/register",data={"username":second_username,"password":"Strong-Second-Pass8!","password_confirm":"Strong-Second-Pass8!"},follow_redirects=False)
-        assert registered.status_code==303
+        logged_in=second.post("/login",data={"username":"cyber expert","password":"test-only-password"},follow_redirects=False)
+        assert logged_in.status_code==303
         assert client.get("/").status_code==200 and second.get("/").status_code==200
         created=client.post("/api/setups",json={"name":"Laptop Only","technologies":["Windows 11"],"keywords":["CVE"],"sources":["CISA"],"date_range":"7d"})
         assert created.status_code==201
@@ -110,7 +102,7 @@ def test_browser_workspaces_are_isolated_and_locally_backed_up(client):
         assert workspace["instance_id"]==restored.json()["instance_id"]
     js=client.get("/static/app.js").text
     assert "localStorage.setItem(WORKSPACE_CACHE_KEY" in js and 'fetch("/api/workspace/restore"' in js
-    assert "my-threatlens-account-workspace-v1" in js and "window.currentUsername" in js
+    assert "my-threatlens-browser-workspace-v1" in js
 def test_custom_date_range_persists(client):
     data={"name":"Custom Dates","technologies":[],"keywords":[],"sources":[],"date_range":"custom","start_date":"2026-06-01","end_date":"2026-07-30"}
     created=client.post("/api/setups",json=data); assert created.status_code==201

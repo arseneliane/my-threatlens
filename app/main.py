@@ -11,7 +11,6 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from sqlalchemy import delete as sql_delete, select, func, update, and_, inspect
 from sqlalchemy.orm import Session
-from sqlalchemy.exc import IntegrityError
 from .config import settings
 from .database import Base, engine, get_db, SessionLocal
 from .models import Setup, Scan, Finding, ChatMessage, SourceStatus, EmailAutomation, User, UserSession
@@ -24,7 +23,7 @@ from .services.imports.service import preview, sample_xlsx, sample_docx
 from .services.exports.excel import create_workbook
 from .services.chat import answer, ollama_answer, ollama_site_answer
 from .services.email import send_findings_email, EmailDeliveryError, EMAIL_PATTERN
-from .services.auth import hash_password, new_session_token, normalize_username, session_token_hash, validate_password, validate_username, verify_password
+from .services.auth import hash_password, new_session_token, normalize_username, session_token_hash, verify_password
 
 ROOT=Path(__file__).parent
 app=FastAPI(title="My ThreatLens",version="1.0.0")
@@ -39,6 +38,7 @@ FINDING_IDS=itertools.count(1)
 SCAN_IDS=itertools.count(1)
 INSTANCE_ID=str(uuid.uuid4())
 SESSION_COOKIE="mythreatlens_session"
+WORKSPACE_COOKIE="threatlens_client"
 SESSION_DAYS=30
 ZERO_DAY_SCAN_KEYWORDS=["Zero-Day","Active Exploitation","Exploit","CISA KEV","Proof of Concept"]
 AUTOMATIC_EMAIL_STATUS={"enabled":False,"last_daily_sent_at":None,"last_critical_sent_at":None,"last_error":None}
@@ -59,13 +59,14 @@ async def require_account(request:Request,call_next):
             if expires and expires.tzinfo is None: expires=expires.replace(tzinfo=timezone.utc)
             if session and expires>now:
                 user=db.get(User,session.user_id)
-                if user:
+                if user and user.username_normalized==normalize_username(settings.shared_username):
                     request.state.user={"id":user.id,"username":user.username}
-                    request.state.client_id=f"user:{user.id}"
+                    workspace_id=request.cookies.get(WORKSPACE_COOKIE) or uuid.uuid4().hex
+                    request.state.client_id=f"browser:{workspace_id}"
             elif session:
                 db.delete(session); db.commit()
             if request.state.user is None: invalid_token=True
-    public=request.url.path in {"/login","/register","/healthz"} or request.url.path.startswith("/static/")
+    public=request.url.path in {"/login","/healthz"} or request.url.path.startswith("/static/")
     if not public and request.state.user is None:
         if request.url.path.startswith("/api/"):
             response=JSONResponse(status_code=401,content={"detail":"Log in to continue."})
@@ -74,6 +75,8 @@ async def require_account(request:Request,call_next):
             response=RedirectResponse(f"/login?next={target}",status_code=303)
     else: response=await call_next(request)
     if invalid_token: response.delete_cookie(SESSION_COOKIE,path="/")
+    if request.state.user and not request.cookies.get(WORKSPACE_COOKIE):
+        response.set_cookie(WORKSPACE_COOKIE,request.state.client_id.removeprefix("browser:"),max_age=365*86400,httponly=True,secure=settings.secure_cookies or request.url.scheme=="https",samesite="strict",path="/")
     response.headers.setdefault("X-Content-Type-Options","nosniff")
     response.headers.setdefault("X-Frame-Options","DENY")
     response.headers.setdefault("Referrer-Policy","strict-origin-when-cross-origin")
@@ -280,6 +283,8 @@ async def run_daily_email_report():
 
 @app.on_event("startup")
 async def startup():
+    if not settings.shared_password:
+        raise RuntimeError("SHARED_PASSWORD must be configured before My ThreatLens can start.")
     if settings.database_url.startswith("sqlite"):
         with engine.begin() as conn:
             if "setups" in inspect(conn).get_table_names():
@@ -289,6 +294,14 @@ async def startup():
                 conn.exec_driver_sql("UPDATE setups SET display_name=name WHERE display_name IS NULL OR display_name='' ")
                 conn.exec_driver_sql("UPDATE setups SET owner_id='legacy' WHERE owner_id IS NULL OR owner_id='' ")
     Base.metadata.create_all(engine)
+    with SessionLocal() as db:
+        normalized=normalize_username(settings.shared_username)
+        shared_user=db.scalar(select(User).where(User.username_normalized==normalized))
+        if not shared_user:
+            shared_user=User(username=settings.shared_username,username_normalized=normalized,password_hash=hash_password(settings.shared_password)); db.add(shared_user)
+        elif not verify_password(settings.shared_password,shared_user.password_hash):
+            shared_user.username=settings.shared_username; shared_user.password_hash=hash_password(settings.shared_password)
+        db.commit()
     if settings.database_url.startswith("sqlite"):
         with engine.begin() as conn:
             columns={column["name"] for column in inspect(conn).get_columns("email_automations")}
@@ -346,28 +359,8 @@ def login(request:Request,username:str=Form(...),password:str=Form(...),next:str
     token=create_user_session(db,user)
     response=RedirectResponse(safe_next(next),status_code=303); set_session_cookie(response,request,token); return response
 
-@app.get("/register",response_class=HTMLResponse,include_in_schema=False)
-def register_page(request:Request,next:str="/"):
-    if request.state.user: return RedirectResponse(safe_next(next),status_code=303)
-    return auth_template(request,"register",next_path=next)
-
-@app.post("/register",response_class=HTMLResponse,include_in_schema=False)
-def register(request:Request,username:str=Form(...),password:str=Form(...),password_confirm:str=Form(...),next:str=Form("/"),db:Session=Depends(get_db)):
-    try:
-        clean_username=validate_username(username)
-        validate_password(password,clean_username)
-        if password!=password_confirm: raise ValueError("The password confirmation does not match.")
-    except ValueError as exc:
-        return auth_template(request,"register",str(exc),username,next,422)
-    normalized=normalize_username(clean_username)
-    if db.scalar(select(User).where(User.username_normalized==normalized)):
-        return auth_template(request,"register","That username is already taken.",username,next,409)
-    user=User(username=clean_username,username_normalized=normalized,password_hash=hash_password(password)); db.add(user)
-    try: db.flush()
-    except IntegrityError:
-        db.rollback(); return auth_template(request,"register","That username is already taken.",username,next,409)
-    token=create_user_session(db,user)
-    response=RedirectResponse(safe_next(next),status_code=303); set_session_cookie(response,request,token); return response
+@app.get("/register",include_in_schema=False)
+def register_page(): return RedirectResponse("/login",status_code=303)
 
 @app.post("/logout",include_in_schema=False)
 def logout(request:Request,db:Session=Depends(get_db)):
