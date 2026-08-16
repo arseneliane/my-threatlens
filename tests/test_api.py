@@ -12,6 +12,8 @@ def test_home_active_name(client):
     assert "function formatPublicationDate(value)" in js.text and 'timeZoneName:"short"' in js.text
     assert "active-pill" in js.text and client.get("/static/setups.css").status_code==200
     assert "function setScanVisual" in js.text and client.get("/static/scan.css").status_code==200
+    assert 'id="nextAutomaticScan"' in r.text and "function startAutomaticScanCountdown" in js.text
+    assert "Automatic scan in ${minutes} min" in js.text
     assert "shield-shape" in r.text and "click Scan Now" in r.text
     assert "Results update when you click Scan Now" in r.text and "window.scanIntervalSeconds" not in r.text
     assert "function updateAutoScanCountdown()" not in js.text and "await startScan()" not in js.text
