@@ -426,11 +426,18 @@ async def run_scan(scan_id):
                         active_exploitation+=int(bool(raw.get("kev",False) or re.search(r"\b(?:actively exploited|active exploitation|under active (?:attack|exploitation)|exploited in the wild)\b",text,re.I)))
                         critical_priority+=int(sev=="Critical")
             scan["progress"]=min(95,10+int((idx+1)/max(len(sources),1)*80))
-        metrics={"zero_day_mentions":zero_day_mentions,"active_exploitation":active_exploitation,"critical_priority":critical_priority,"sources_checked":len(sources),"live_sources":live_sources} if zero_day_mode else {}
+        if zero_day_mode:
+            metrics={"zero_day_mentions":zero_day_mentions,"active_exploitation":active_exploitation,"critical_priority":critical_priority,"sources_checked":len(sources),"live_sources":live_sources}
+        else:
+            newest=max((utc_publication_date(finding.publication_date) for finding in results),default=None)
+            newest_age_days=max(1,math.ceil((scan_now-newest).total_seconds()/86400)) if newest else None
+            recommended_range=next((f"{days}d" for days in (3,7,14,30,60,90) if newest_age_days is not None and days>=newest_age_days),None)
+            metrics={"matched_total":added,"in_range":added_in_range,"excluded_by_date":added-added_in_range,"recommended_range":recommended_range}
         result_cache[setup.id]=results; scan.update(status="completed",progress=100,findings_count=added_in_range,sources=source_states,metrics=metrics)
         scan["message"]=f"Completed — {added_in_range} findings in selected date range"
+        if not zero_day_mode and added_in_range==0 and added:
+            scan["message"]=f"Completed — no findings were published in the selected date range; {added} older matching items were excluded"
         if zero_day_mode: scan["message"]=f"Zero-day watch completed: {added_in_range} priority signals"
-        if added!=added_in_range: scan["message"]+=f" ({added} collected total)"
         setup.last_scan_at=datetime.now(timezone.utc); db.commit()
     await send_new_critical_alerts([finding for finding in results if publication_in_setup_range(finding.publication_date,setup,scan_now)],setup)
 @app.post("/api/scans",status_code=202)

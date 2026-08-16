@@ -154,6 +154,7 @@ def test_scan_202_completion_filters_export(client,monkeypatch):
         if status["status"]=="completed": break
         time.sleep(.03)
     assert status["status"]=="completed"
+    assert {"matched_total","in_range","excluded_by_date","recommended_range"}.issubset(status["metrics"])
     result=client.get("/api/findings?severity=Critical").json(); assert result["page"]==1 and result["pages"]>=1
     assert result["biggest"] and result["biggest"]["id"]
     sent={}
@@ -188,8 +189,8 @@ def test_scan_count_uses_selected_date_range(client):
         time.sleep(.03)
     visible=client.get("/api/findings").json()["total"]
     assert status["findings_count"]==visible==0
-    assert "0 findings in selected date range" in status["message"]
-    assert "collected total" in status["message"]
+    assert "no findings were published in the selected date range" in status["message"]
+    assert status["metrics"]["excluded_by_date"]==2
 
 def test_zero_day_addon_scans_independently_of_regular_keywords(client):
     client.post("/api/setups",json={"name":"Zero-Day Watch","technologies":["Windows 11","Exchange Server"],"keywords":["SQL Injection"],"sources":["The Hacker News"],"date_range":"7d"})
