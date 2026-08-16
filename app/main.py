@@ -13,7 +13,7 @@ from sqlalchemy import delete as sql_delete, select, func, update, and_, inspect
 from sqlalchemy.orm import Session
 from .config import settings
 from .database import Base, engine, get_db, SessionLocal
-from .models import Setup, Scan, Finding, ChatMessage, SourceStatus
+from .models import Setup, Scan, Finding, ChatMessage, SourceStatus, EmailAutomation
 from .services.collectors.fixtures import fixture_items
 from .services.collectors.rss import collect_source
 from .services.matching.engine import match_item
@@ -21,7 +21,7 @@ from .services.enrichment.core import extract_cves, severity, relevance
 from .services.imports.service import preview, sample_xlsx, sample_docx
 from .services.exports.excel import create_workbook
 from .services.chat import answer, ollama_answer, ollama_site_answer
-from .services.email import send_findings_email, EmailDeliveryError
+from .services.email import send_findings_email, EmailDeliveryError, EMAIL_PATTERN
 
 ROOT=Path(__file__).parent
 app=FastAPI(title="My ThreatLens",version="1.0.0")
@@ -85,6 +85,12 @@ class EmailIn(BaseModel):
     subject:str="My ThreatLens findings report"
     message:str="Attached is the requested My ThreatLens findings report."
     finding_ids:list[int]=[]
+class EmailAutomationIn(BaseModel):
+    recipients:list[str]=[]
+    daily_enabled:bool=True
+    critical_enabled:bool=True
+    subject:str="My ThreatLens security alert"
+    message:str="Kindly review the threats below and take the required action."
 
 class WorkspaceRestore(BaseModel):
     setups:list[SetupIn]
@@ -216,33 +222,54 @@ def automatic_email_setup(db):
     if settings.automatic_email_setup_name.strip(): query=query.where(Setup.display_name==settings.automatic_email_setup_name.strip())
     return db.scalar(query.order_by(Setup.updated_at.desc(),Setup.id.desc()))
 
-async def deliver_automatic_email(subject,body,rows,setup,status_key):
-    if not settings.automatic_email_recipient.strip() or not rows: return False
-    try:
-        await asyncio.to_thread(send_findings_email,settings,settings.automatic_email_recipient.strip(),subject,body,rows,setup)
-        AUTOMATIC_EMAIL_STATUS[status_key]=datetime.now(timezone.utc).isoformat(); AUTOMATIC_EMAIL_STATUS["last_error"]=None
-        return True
-    except Exception as exc:
-        AUTOMATIC_EMAIL_STATUS["last_error"]=f"{type(exc).__name__}: automatic email delivery failed"
-        return False
+def environment_recipients():
+    return [value.strip() for value in re.split(r"[,;]",settings.automatic_email_recipient) if value.strip()]
+
+async def deliver_automatic_email(subject,body,rows,setup,status_key,recipients):
+    if not recipients or not rows: return False
+    sent=False
+    for recipient in recipients:
+        try:
+            await asyncio.to_thread(send_findings_email,settings,recipient,subject,body,rows,setup)
+            sent=True
+        except Exception as exc:
+            AUTOMATIC_EMAIL_STATUS["last_error"]=f"{type(exc).__name__}: automatic email delivery failed"
+    if sent:
+        AUTOMATIC_EMAIL_STATUS[status_key]=datetime.now(timezone.utc).isoformat()
+        AUTOMATIC_EMAIL_STATUS["last_error"]=None
+    return sent
 
 async def send_new_critical_alerts(rows,setup):
-    if not settings.critical_email_enabled: return
-    fresh=[finding for finding in rows if finding.severity=="Critical" and finding.fingerprint not in AUTOMATICALLY_ALERTED_FINGERPRINTS]
+    setup_key=getattr(setup,"id",getattr(setup,"name","unknown"))
+    with SessionLocal() as db:
+        config=db.scalar(select(EmailAutomation).where(EmailAutomation.setup_id==getattr(setup,"id",-1)))
+        recipients=list(config.recipients or []) if config else environment_recipients()
+        enabled=config.critical_enabled if config else settings.critical_email_enabled
+        subject=(config.subject if config else "Critical threat detected").strip()
+        body=(config.message if config else "Immediate review required.").strip()
+    if not enabled or not recipients: return
+    fresh=[finding for finding in rows if finding.severity=="Critical" and (setup_key,finding.fingerprint) not in AUTOMATICALLY_ALERTED_FINGERPRINTS]
     if not fresh: return
     selected=top_findings(fresh,3)
-    if await deliver_automatic_email("Critical threat detected","Immediate review required.",selected,setup,"last_critical_sent_at"):
-        AUTOMATICALLY_ALERTED_FINGERPRINTS.update(finding.fingerprint for finding in fresh)
+    if await deliver_automatic_email(subject,body,selected,setup,"last_critical_sent_at",recipients):
+        AUTOMATICALLY_ALERTED_FINGERPRINTS.update((setup_key,finding.fingerprint) for finding in fresh)
 
 async def run_daily_email_report():
     with SessionLocal() as db:
-        setup=automatic_email_setup(db)
-        if not setup or not setup.technologies or not setup.keywords or not setup.sources: return
-        scan_id=next(SCAN_IDS); SCANS_CACHE[scan_id]={"id":scan_id,"setup_id":setup.id,"kind":"standard","status":"queued","progress":0,"message":"Scheduled daily scan queued","findings_count":0,"sources":[],"metrics":{}}
-    await run_scan(scan_id)
-    with SessionLocal() as db:
-        setup=db.get(Setup,SCANS_CACHE[scan_id]["setup_id"]); rows=scoped_findings(db,setup,{})
-        await deliver_automatic_email("My ThreatLens daily brief","Top findings requiring attention.",top_findings(rows,5),setup,"last_daily_sent_at")
+        configs=db.scalars(select(EmailAutomation).where(EmailAutomation.daily_enabled==True)).all()
+        jobs=[(config.setup_id,list(config.recipients or []),config.subject,config.message) for config in configs if config.recipients]
+        if not jobs and environment_recipients():
+            setup=automatic_email_setup(db)
+            if setup: jobs=[(setup.id,environment_recipients(),"My ThreatLens daily brief","Top findings requiring attention.")]
+    for setup_id,recipients,subject,body in jobs:
+        with SessionLocal() as db:
+            setup=db.get(Setup,setup_id)
+            if not setup or not setup.technologies or not setup.keywords or not setup.sources: continue
+            scan_id=next(SCAN_IDS); SCANS_CACHE[scan_id]={"id":scan_id,"setup_id":setup.id,"kind":"standard","status":"queued","progress":0,"message":"Scheduled daily scan queued","findings_count":0,"sources":[],"metrics":{}}
+        await run_scan(scan_id)
+        with SessionLocal() as db:
+            setup=db.get(Setup,setup_id); rows=scoped_findings(db,setup,{})
+            await deliver_automatic_email(subject,body,top_findings(rows,5),setup,"last_daily_sent_at",recipients)
 
 @app.on_event("startup")
 async def startup():
@@ -257,18 +284,22 @@ async def startup():
     if settings.require_demo_auth and (not settings.demo_username or len(settings.demo_password)<12):
         raise RuntimeError("Hosted demo authentication requires DEMO_USERNAME and a DEMO_PASSWORD of at least 12 characters.")
     Base.metadata.create_all(engine)
+    if settings.database_url.startswith("sqlite"):
+        with engine.begin() as conn:
+            columns={column["name"] for column in inspect(conn).get_columns("email_automations")}
+            if "subject" not in columns: conn.exec_driver_sql("ALTER TABLE email_automations ADD COLUMN subject VARCHAR(200) DEFAULT 'My ThreatLens security alert'")
+            if "message" not in columns: conn.exec_driver_sql("ALTER TABLE email_automations ADD COLUMN message TEXT DEFAULT 'Kindly review the threats below and take the required action.'")
     with SessionLocal() as db:
         # Remove legacy persisted operational data. Only saved setup configuration remains durable.
         db.execute(sql_delete(SourceStatus)); db.execute(sql_delete(ChatMessage)); db.execute(sql_delete(Finding)); db.execute(sql_delete(Scan))
         FINDINGS_CACHE.clear(); ZERO_DAY_FINDINGS_CACHE.clear(); SCANS_CACHE.clear(); CHAT_CACHE.clear(); SITE_CHAT_CACHE.clear()
         db.commit()
     global AUTOMATION_SCHEDULER
-    AUTOMATIC_EMAIL_STATUS["enabled"]=bool(settings.automatic_email_recipient.strip())
-    if AUTOMATIC_EMAIL_STATUS["enabled"]:
-        zone=ZoneInfo(settings.automatic_email_timezone)
-        AUTOMATION_SCHEDULER=AsyncIOScheduler(timezone=zone)
-        AUTOMATION_SCHEDULER.add_job(run_daily_email_report,CronTrigger(hour=settings.automatic_email_hour,minute=settings.automatic_email_minute,timezone=zone),id="daily-email",replace_existing=True,coalesce=True,max_instances=1)
-        AUTOMATION_SCHEDULER.start()
+    AUTOMATIC_EMAIL_STATUS["enabled"]=True
+    zone=ZoneInfo(settings.automatic_email_timezone)
+    AUTOMATION_SCHEDULER=AsyncIOScheduler(timezone=zone)
+    AUTOMATION_SCHEDULER.add_job(run_daily_email_report,CronTrigger(hour=settings.automatic_email_hour,minute=settings.automatic_email_minute,timezone=zone),id="daily-email",replace_existing=True,coalesce=True,max_instances=1)
+    AUTOMATION_SCHEDULER.start()
 
 @app.on_event("shutdown")
 async def shutdown():
@@ -441,6 +472,33 @@ def automatic_email_status():
     recipient=settings.automatic_email_recipient.strip()
     masked=(recipient[:2]+"…@"+recipient.split("@",1)[1]) if "@" in recipient else ""
     return {**AUTOMATIC_EMAIL_STATUS,"recipient":masked,"timezone":settings.automatic_email_timezone,"daily_time":f"{settings.automatic_email_hour:02d}:{settings.automatic_email_minute:02d}","critical_alerts":settings.critical_email_enabled}
+@app.get("/api/automatic-email")
+def get_automatic_email(request:Request,db:Session=Depends(get_db)):
+    setup=ensure_workspace(db,request.state.client_id)
+    config=db.scalar(select(EmailAutomation).where(EmailAutomation.setup_id==setup.id))
+    return {"recipients":list(config.recipients or []) if config else [],"daily_enabled":config.daily_enabled if config else True,"critical_enabled":config.critical_enabled if config else True,"subject":config.subject if config else "My ThreatLens security alert","message":config.message if config else "Kindly review the threats below and take the required action.","timezone":settings.automatic_email_timezone,"daily_time":f"{settings.automatic_email_hour:02d}:{settings.automatic_email_minute:02d}"}
+@app.put("/api/automatic-email")
+def save_automatic_email(data:EmailAutomationIn,request:Request,db:Session=Depends(get_db)):
+    setup=ensure_workspace(db,request.state.client_id)
+    recipients=[]
+    for raw in data.recipients:
+        recipient=raw.strip().lower()
+        if recipient and recipient not in recipients: recipients.append(recipient)
+    if len(recipients)>10: raise HTTPException(422,"Enter no more than 10 email addresses.")
+    invalid=[recipient for recipient in recipients if not EMAIL_PATTERN.fullmatch(recipient)]
+    if invalid: raise HTTPException(422,f"Invalid email address: {invalid[0]}")
+    subject=data.subject.strip()
+    message=data.message.strip()
+    if len(subject)>200: raise HTTPException(422,"The subject must be 200 characters or fewer.")
+    if len(message)>1000: raise HTTPException(422,"The message must be 1,000 characters or fewer.")
+    if recipients and (not subject or not message): raise HTTPException(422,"Enter both a subject and a message.")
+    config=db.scalar(select(EmailAutomation).where(EmailAutomation.setup_id==setup.id))
+    if not config:
+        config=EmailAutomation(setup_id=setup.id); db.add(config)
+    config.recipients=recipients; config.daily_enabled=data.daily_enabled; config.critical_enabled=data.critical_enabled
+    config.subject=subject or "My ThreatLens security alert"; config.message=message or "Kindly review the threats below and take the required action."
+    db.commit()
+    return get_automatic_email(request,db)
 @app.put("/api/findings/{fid}/review")
 def review(fid:int,data:ReviewIn,request:Request,db:Session=Depends(get_db)):
     f=cached_finding(fid,db,request.state.client_id)

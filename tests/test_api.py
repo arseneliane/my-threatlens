@@ -127,6 +127,16 @@ def test_automatic_critical_email_is_deduplicated(monkeypatch):
     asyncio.run(main.send_new_critical_alerts([finding],setup))
     asyncio.run(main.send_new_critical_alerts([finding],setup))
     assert sent==[["critical-one"]]
+def test_automatic_email_settings_are_saved_per_setup(client):
+    initial=client.get("/api/automatic-email")
+    assert initial.status_code==200 and initial.json()["recipients"]==[]
+    saved=client.put("/api/automatic-email",json={"recipients":["IT@example.com","infosec@example.com","it@example.com"],"daily_enabled":True,"critical_enabled":False,"subject":"Security review","message":"Kindly check it now."})
+    assert saved.status_code==200
+    assert saved.json()["recipients"]==["it@example.com","infosec@example.com"]
+    assert saved.json()["subject"]=="Security review"
+    assert saved.json()["critical_enabled"] is False
+    too_many=client.put("/api/automatic-email",json={"recipients":[f"user{i}@example.com" for i in range(11)]})
+    assert too_many.status_code==422
 def test_scan_202_completion_filters_export(client,monkeypatch):
     setups=client.get("/api/setups").json(); default=next(s for s in setups if s["name"]=="Default Setup"); client.post(f'/api/setups/{default["id"]}/activate')
     r=client.post("/api/scans"); assert r.status_code==202

@@ -90,3 +90,14 @@ class AuditEvent(Base):
     action: Mapped[str] = mapped_column(String(80))
     details: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+class EmailAutomation(Base):
+    __tablename__ = "email_automations"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    setup_id: Mapped[int] = mapped_column(ForeignKey("setups.id"), unique=True, index=True)
+    recipients: Mapped[list] = mapped_column(JSON, default=list)
+    daily_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    critical_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    subject: Mapped[str] = mapped_column(String(200), default="My ThreatLens security alert")
+    message: Mapped[str] = mapped_column(Text, default="Kindly review the threats below and take the required action.")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)

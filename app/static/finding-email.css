@@ -74,3 +74,17 @@ tr.selected-finding td {
 .email-form .modalfoot {
   margin: 0 -20px;
 }
+
+.email-form .automation-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #17364a;
+}
+
+.email-form .automation-toggle input {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  accent-color: var(--blue);
+}
