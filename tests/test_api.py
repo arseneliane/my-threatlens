@@ -122,7 +122,7 @@ def test_automatic_critical_email_is_deduplicated(monkeypatch):
     monkeypatch.setattr(main.settings,"critical_email_enabled",True)
     monkeypatch.setattr(main,"send_findings_email",lambda settings,recipient,subject,body,rows,setup:sent.append([row.fingerprint for row in rows]))
     main.AUTOMATICALLY_ALERTED_FINGERPRINTS.clear()
-    finding=SimpleNamespace(severity="Critical",fingerprint="critical-one")
+    finding=SimpleNamespace(severity="Critical",fingerprint="critical-one",kev=False,ai_score=90,cvss=9.8,publication_date=datetime.now(timezone.utc))
     setup=SimpleNamespace(name="Default Setup")
     asyncio.run(main.send_new_critical_alerts([finding],setup))
     asyncio.run(main.send_new_critical_alerts([finding],setup))

@@ -207,6 +207,10 @@ def biggest_threat(rows):
     severity_rank={"Critical":4,"High":3,"Medium":2,"Low":1,"Unknown":0}
     return max(rows,key=lambda f:(severity_rank.get(f.severity,0),bool(f.kev),f.ai_score or 0,f.cvss or 0,utc_publication_date(f.publication_date)),default=None)
 
+def top_findings(rows,limit):
+    severity_rank={"Critical":4,"High":3,"Medium":2,"Low":1,"Unknown":0}
+    return sorted(rows,key=lambda f:(severity_rank.get(f.severity,0),bool(f.kev),f.ai_score or 0,f.cvss or 0,utc_publication_date(f.publication_date)),reverse=True)[:limit]
+
 def automatic_email_setup(db):
     query=select(Setup).where(Setup.active==True)
     if settings.automatic_email_setup_name.strip(): query=query.where(Setup.display_name==settings.automatic_email_setup_name.strip())
@@ -226,7 +230,8 @@ async def send_new_critical_alerts(rows,setup):
     if not settings.critical_email_enabled: return
     fresh=[finding for finding in rows if finding.severity=="Critical" and finding.fingerprint not in AUTOMATICALLY_ALERTED_FINGERPRINTS]
     if not fresh: return
-    if await deliver_automatic_email("My ThreatLens — critical threat alert","A new critical threat requires immediate review.",fresh[:10],setup,"last_critical_sent_at"):
+    selected=top_findings(fresh,3)
+    if await deliver_automatic_email("Critical threat detected","Immediate review required.",selected,setup,"last_critical_sent_at"):
         AUTOMATICALLY_ALERTED_FINGERPRINTS.update(finding.fingerprint for finding in fresh)
 
 async def run_daily_email_report():
@@ -237,7 +242,7 @@ async def run_daily_email_report():
     await run_scan(scan_id)
     with SessionLocal() as db:
         setup=db.get(Setup,SCANS_CACHE[scan_id]["setup_id"]); rows=scoped_findings(db,setup,{})
-        await deliver_automatic_email("My ThreatLens — daily 9:00 security report","Daily monitoring summary. Review the highest-priority findings below.",rows[:50],setup,"last_daily_sent_at")
+        await deliver_automatic_email("My ThreatLens daily brief","Top findings requiring attention.",top_findings(rows,5),setup,"last_daily_sent_at")
 
 @app.on_event("startup")
 async def startup():
