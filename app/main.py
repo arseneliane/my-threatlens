@@ -262,12 +262,17 @@ async def send_new_critical_alerts(rows,setup):
         enabled=config.critical_enabled if config else settings.critical_email_enabled
         subject=(config.subject if config else "Critical threat detected").strip()
         body=(config.message if config else "Immediate review required.").strip()
-    if not enabled or not recipients: return
-    fresh=[finding for finding in rows if finding.severity=="Critical" and (setup_key,finding.fingerprint) not in AUTOMATICALLY_ALERTED_FINGERPRINTS]
-    if not fresh: return
+    critical=[finding for finding in rows if finding.severity=="Critical"]
+    result={"enabled":enabled,"recipient_count":len(recipients),"critical_total":len(critical),"new_critical_count":0,"email_sent":False}
+    if not enabled or not recipients: return result
+    fresh=[finding for finding in critical if (setup_key,finding.fingerprint) not in AUTOMATICALLY_ALERTED_FINGERPRINTS]
+    result["new_critical_count"]=len(fresh)
+    if not fresh: return result
     selected=top_findings(fresh,3)
     if await deliver_automatic_email(subject,body,selected,setup,"last_critical_sent_at",recipients):
         AUTOMATICALLY_ALERTED_FINGERPRINTS.update((setup_key,finding.fingerprint) for finding in fresh)
+        result["email_sent"]=True
+    return result
 
 async def run_daily_email_report():
     with SessionLocal() as db:
@@ -531,7 +536,7 @@ async def run_scan(scan_id):
         if zero_day_mode: scan["message"]=f"Zero-day watch completed: {added_in_range} priority signals"
         setup.last_scan_at=datetime.now(timezone.utc); db.commit()
     if not scan.get("suppress_critical_email"):
-        await send_new_critical_alerts([finding for finding in results if publication_in_setup_range(finding.publication_date,setup,scan_now)],setup)
+        scan["automation"]=await send_new_critical_alerts([finding for finding in results if publication_in_setup_range(finding.publication_date,setup,scan_now)],setup)
 @app.post("/api/scans",status_code=202)
 async def start_scan(request:Request,bg:BackgroundTasks,db:Session=Depends(get_db)):
     setup=ensure_workspace(db,request.state.client_id)
@@ -555,7 +560,7 @@ async def start_zero_day_scan(request:Request,bg:BackgroundTasks,db:Session=Depe
 def scan_status(scan_id:int,request:Request,db:Session=Depends(get_db)):
     s=SCANS_CACHE.get(scan_id)
     if not s or not owned_setup(db,request.state.client_id,s["setup_id"]): raise HTTPException(404,"Scan not found.")
-    return {k:s.get(k) for k in ("id","kind","status","progress","message","findings_count","sources","metrics")}
+    return {k:s.get(k) for k in ("id","kind","status","progress","message","findings_count","sources","metrics","automation")}
 @app.get("/api/findings")
 def findings(request:Request,page:int=1,page_size:int=settings.results_page_size,db:Session=Depends(get_db)):
     setup=ensure_workspace(db,request.state.client_id); params=dict(request.query_params)
@@ -622,6 +627,20 @@ async def test_automatic_email(request:Request,setup_id:int|None=None,db:Session
             failed.append(recipient)
     if not sent: raise HTTPException(503,"The test email could not be delivered. Check the email configuration and try again.")
     return {"sent_count":len(sent),"failed_count":len(failed),"message":f"Test email sent to {len(sent)} of {len(recipients)} recipients."}
+
+@app.post("/api/automatic-email/run-now",status_code=202)
+async def run_automatic_email_now(request:Request,bg:BackgroundTasks,setup_id:int|None=None,db:Session=Depends(get_db)):
+    setup=automation_setup(db,request,setup_id)
+    config=db.scalar(select(EmailAutomation).where(EmailAutomation.setup_id==setup.id))
+    if not config or not config.recipients: raise HTTPException(422,"Save at least one recipient before running the critical check.")
+    if not config.critical_enabled: raise HTTPException(422,"Enable the new Critical threat option before running the check.")
+    if not setup.technologies or not setup.keywords or not setup.sources: raise HTTPException(422,"Choose technologies, keywords, and sources for this setup first.")
+    running=next((scan for scan in SCANS_CACHE.values() if scan.get("setup_id")==setup.id and scan.get("status") in ("queued","running")),None)
+    if running: raise HTTPException(409,"A scan is already running for this setup.")
+    scan_id=next(SCAN_IDS)
+    SCANS_CACHE[scan_id]={"id":scan_id,"setup_id":setup.id,"kind":"standard","status":"queued","progress":0,"message":"Critical automation check queued","findings_count":0,"sources":[],"metrics":{},"automation":None}
+    bg.add_task(run_scan,scan_id)
+    return {"scan_id":scan_id,"status":"queued","message":"Critical automation check started."}
 @app.put("/api/findings/{fid}/review")
 def review(fid:int,data:ReviewIn,request:Request,db:Session=Depends(get_db)):
     f=cached_finding(fid,db,request.state.client_id)

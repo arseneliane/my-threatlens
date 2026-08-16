@@ -93,3 +93,24 @@ tr.selected-finding td {
   display: flex;
   gap: 8px;
 }
+
+.automation-demo {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 3px 14px;
+  align-items: center;
+  padding: 13px 14px;
+  border: 1px solid #a9d9dc;
+  border-radius: 10px;
+  background: #f0faf9;
+}
+
+.automation-demo strong { color: var(--teal); }
+.automation-demo span { color: var(--muted); font-size: 12px; }
+.automation-demo button { grid-column: 2; grid-row: 1 / span 2; color: var(--blue); border-color: #75b9c1; font-weight: 700; }
+
+@media (max-width: 600px) {
+  .automation-demo { grid-template-columns: 1fr; }
+  .automation-demo button { grid-column: 1; grid-row: auto; margin-top: 7px; }
+  .automatic-email-actions { flex-wrap: wrap; }
+}

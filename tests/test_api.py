@@ -226,6 +226,19 @@ def test_automatic_email_test_sends_to_every_saved_recipient(client,monkeypatch)
     result=client.post("/api/automatic-email/test")
     assert result.status_code==200 and result.json()["sent_count"]==2
     assert sent==["it@example.com","infosec@example.com"]
+def test_manual_critical_automation_check_uses_saved_setup(client,monkeypatch):
+    from app import main
+    assert client.post("/api/automatic-email/run-now").status_code==422
+    client.put("/api/automatic-email",json={"recipients":["supervisor@example.com"],"critical_enabled":True})
+    completed=[]
+    async def fake_run_scan(scan_id):
+        completed.append(scan_id)
+        main.SCANS_CACHE[scan_id].update(status="completed",progress=100,automation={"email_sent":False,"critical_total":0,"new_critical_count":0,"recipient_count":1})
+    monkeypatch.setattr(main,"run_scan",fake_run_scan)
+    result=client.post("/api/automatic-email/run-now")
+    assert result.status_code==202 and completed==[result.json()["scan_id"]]
+    status=client.get(f'/api/scans/{result.json()["scan_id"]}').json()
+    assert status["status"]=="completed" and status["automation"]["recipient_count"]==1
 def test_scan_202_completion_filters_export(client,monkeypatch):
     setups=client.get("/api/setups").json(); default=next(s for s in setups if s["name"]=="Default Setup"); client.post(f'/api/setups/{default["id"]}/activate')
     r=client.post("/api/scans"); assert r.status_code==202
