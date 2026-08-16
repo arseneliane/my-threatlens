@@ -343,7 +343,9 @@ def create_user_session(db,user):
     return token
 
 def set_session_cookie(response,request,token):
-    response.set_cookie(SESSION_COOKIE,token,max_age=SESSION_DAYS*86400,httponly=True,secure=settings.secure_cookies or request.url.scheme=="https",samesite="strict",path="/")
+    # No Max-Age/Expires: authentication ends when the browser session closes.
+    # The separate workspace cookie remains persistent so saved setups survive.
+    response.set_cookie(SESSION_COOKIE,token,httponly=True,secure=settings.secure_cookies or request.url.scheme=="https",samesite="strict",path="/")
 
 @app.get("/login",response_class=HTMLResponse,include_in_schema=False)
 def login_page(request:Request,next:str="/"):

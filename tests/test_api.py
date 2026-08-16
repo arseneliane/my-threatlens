@@ -72,15 +72,19 @@ def test_shared_login_and_logout(client):
         assert visitor.get("/healthz").status_code==200
         login=visitor.get("/login")
         assert login.status_code==200 and "Every security headline" in login.text
-        assert "Each browser keeps a separate workspace" in login.text
+        assert "Login ends when the browser closes" in login.text
         assert "Register" not in login.text
         assert visitor.get("/register",follow_redirects=False).status_code==303
         wrong=visitor.post("/login",data={"username":"cyber expert","password":"wrong"})
         assert wrong.status_code==401 and "incorrect" in wrong.text
         correct=visitor.post("/login",data={"username":"CYBER EXPERT","password":"test-only-password"},follow_redirects=False)
         assert correct.status_code==303 and visitor.cookies.get("mythreatlens_session")
+        session_cookie=correct.headers["set-cookie"]
+        assert "Max-Age" not in session_cookie and "Expires" not in session_cookie
         allowed=visitor.get("/")
         assert allowed.status_code==200 and "cyber expert" in allowed.text and allowed.headers["x-frame-options"]=="DENY"
+        workspace_cookie=allowed.headers["set-cookie"]
+        assert "threatlens_client=" in workspace_cookie and "Max-Age=31536000" in workspace_cookie
         logged_out=visitor.post("/logout",follow_redirects=False)
         assert logged_out.status_code==303 and logged_out.headers["location"]=="/login"
         assert visitor.get("/",follow_redirects=False).status_code==303

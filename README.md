@@ -30,7 +30,7 @@ Collectors feed a normalization and enrichment pipeline. A finding is retained o
 
 ## 6. Privacy and Security
 
-The site uses one shared demonstration login. Each browser receives a separate workspace identifier, so changes made on one laptop do not affect another browser or computer. The shared password is stored as a salted PBKDF2-SHA256 hash, and opaque login sessions are stored only as hashes. The browser keeps a workspace-specific local backup of setup configuration for recovery. Findings, scans, reviews, and chat messages are not placed in browser storage and remain temporary. SMTP and AI credentials remain in server environment settings and are never sent to the browser.
+The site uses one shared demonstration login. Its session cookie expires when the browser closes, so credentials are requested again when it is reopened. A separate persistent workspace identifier and browser backup preserve that browser's setups. Changes made on one laptop do not affect another browser or computer. The shared password is stored as a salted PBKDF2-SHA256 hash, and opaque login sessions are stored only as hashes. Findings, scans, reviews, and chat messages are not placed in browser storage and remain temporary. SMTP and AI credentials remain in server environment settings and are never sent to the browser.
 
 ### Email setup
 
