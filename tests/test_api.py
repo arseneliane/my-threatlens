@@ -137,6 +137,14 @@ def test_automatic_email_settings_are_saved_per_setup(client):
     assert saved.json()["critical_enabled"] is False
     too_many=client.put("/api/automatic-email",json={"recipients":[f"user{i}@example.com" for i in range(11)]})
     assert too_many.status_code==422
+def test_automatic_email_test_sends_to_every_saved_recipient(client,monkeypatch):
+    from app import main
+    sent=[]
+    client.put("/api/automatic-email",json={"recipients":["it@example.com","infosec@example.com"]})
+    monkeypatch.setattr(main,"send_findings_email",lambda settings,recipient,subject,body,rows,setup:sent.append(recipient))
+    result=client.post("/api/automatic-email/test")
+    assert result.status_code==200 and result.json()["sent_count"]==2
+    assert sent==["it@example.com","infosec@example.com"]
 def test_scan_202_completion_filters_export(client,monkeypatch):
     setups=client.get("/api/setups").json(); default=next(s for s in setups if s["name"]=="Default Setup"); client.post(f'/api/setups/{default["id"]}/activate')
     r=client.post("/api/scans"); assert r.status_code==202

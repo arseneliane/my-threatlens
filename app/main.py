@@ -499,6 +499,21 @@ def save_automatic_email(data:EmailAutomationIn,request:Request,db:Session=Depen
     config.subject=subject or "My ThreatLens security alert"; config.message=message or "Kindly review the threats below and take the required action."
     db.commit()
     return get_automatic_email(request,db)
+@app.post("/api/automatic-email/test")
+async def test_automatic_email(request:Request,db:Session=Depends(get_db)):
+    setup=ensure_workspace(db,request.state.client_id)
+    config=db.scalar(select(EmailAutomation).where(EmailAutomation.setup_id==setup.id))
+    recipients=list(config.recipients or []) if config else []
+    if not recipients: raise HTTPException(422,"Save at least one recipient before sending a test.")
+    sent=[]; failed=[]
+    for recipient in recipients:
+        try:
+            await asyncio.to_thread(send_findings_email,settings,recipient,"My ThreatLens automatic email test","Automatic email is configured correctly for this setup.",[],setup)
+            sent.append(recipient)
+        except Exception:
+            failed.append(recipient)
+    if not sent: raise HTTPException(503,"The test email could not be delivered. Check the email configuration and try again.")
+    return {"sent_count":len(sent),"failed_count":len(failed),"message":f"Test email sent to {len(sent)} of {len(recipients)} recipients."}
 @app.put("/api/findings/{fid}/review")
 def review(fid:int,data:ReviewIn,request:Request,db:Session=Depends(get_db)):
     f=cached_finding(fid,db,request.state.client_id)

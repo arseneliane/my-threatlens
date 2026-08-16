@@ -88,3 +88,8 @@ tr.selected-finding td {
   flex: 0 0 auto;
   accent-color: var(--blue);
 }
+
+.automatic-email-actions {
+  display: flex;
+  gap: 8px;
+}
