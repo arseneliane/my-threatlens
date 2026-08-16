@@ -59,6 +59,8 @@ def test_home_active_name(client):
     assert "/?open=setups" in about.text and "/?open=import" in about.text
     assert "How to use the website" in about.text and "Define your scope" in about.text
     assert "AI-assisted summaries" in about.text and "independent workspace" in about.text
+    assert "Why My ThreatLens?" in about.text and "Traditional vulnerability-management platforms" in about.text
+    assert "tenable" not in about.text.lower()
     assert "does not collect user email addresses" in about.text and "one-way hash" in about.text
     assert 'href="/static/My-ThreatLens-Presentation.pptx"' in about.text
     assert "Download PowerPoint" in about.text
