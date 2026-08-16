@@ -26,10 +26,9 @@ KEYWORD_ALIASES = {
  "Privilege Escalation":[r"\bprivilege escalation\b"],"Authentication Bypass":[r"\bauthentication bypass\b",r"\bauth bypass\b"],
  "Lateral Movement":[r"\blateral movement\b"],"Command Injection":[r"\bcommand injection\b"],"SQL Injection":[r"\bSQL injection\b",r"\bSQLi\b"],
  "XSS":[r"\bXSS\b",r"\bcross-site scripting\b",r"\b(?:stored|reflected) XSS\b"],"SSRF":[r"\bSSRF\b",r"\bserver-side request forgery\b"],
- "Directory Traversal":[r"\bdirectory traversal\b",r"\bpath traversal\b"],"Active Exploitation":[r"\bactively exploited\b",r"\bactive exploitation\b"],
+ "Directory Traversal":[r"\bdirectory traversal\b",r"\bpath traversal\b"],"Active Exploitation":[r"\bactively exploited\b",r"\bactive exploitation\b",r"\bexploited in the wild\b",r"\bunder active (?:attack|exploitation)\b",r"\bexploitation (?:has been )?observed\b",r"\battacks? exploiting\b"],
  "CISA KEV":[r"\bCISA KEV\b",r"\bknown exploited vulnerabilities\b",r"\bKEV catalog\b"],
  "CVSS":[r"\bCVSS\b"],"EPSS":[r"\bEPSS\b"],"Proof of Concept":[r"\bproof[- ]of[- ]concept\b",r"\bPoC\b",r"\bdemonstration exploit\b"],
  "Ransomware":[r"\bransomware\b"],"Malware":[r"\bmalware\b"],"Trojan":[r"\btrojan\b"],"Worm":[r"\bworm\b"],"Rootkit":[r"\brootkit\b"],
  "Password Spray":[r"\bpassword spray(?:ing)?\b"],"Credential Stuffing":[r"\bcredential stuffing\b"],"MFA Bypass":[r"\bMFA bypass\b",r"\bmulti-factor authentication bypass\b"]
 }
-

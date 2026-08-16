@@ -133,6 +133,27 @@
   font-size: 12px;
 }
 
+.zero-day-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 15px 0;
+}
+
+.zero-day-metrics[hidden] { display: none; }
+
+.zero-day-metrics div {
+  display: grid;
+  gap: 2px;
+  padding: 12px;
+  border: 1px solid #f1c9a7;
+  border-radius: 9px;
+  background: #fff;
+}
+
+.zero-day-metrics b { color: #9a3412; font-size: 21px; }
+.zero-day-metrics span { color: #785b45; font-size: 11px; }
+
 .zero-day-results table {
   min-width: 980px;
   background: #fff;
@@ -155,6 +176,7 @@
 @media (max-width: 600px) {
   .zero-day-button { grid-template-columns: auto 1fr; padding: 20px; }
   .zero-day-percent { display: none; }
+  .zero-day-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (prefers-reduced-motion: reduce) {

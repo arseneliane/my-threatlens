@@ -1,70 +1,23 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>About · My ThreatLens</title>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>About &amp; User Guide · My ThreatLens</title>
   <link rel="icon" type="image/png" href="/static/my-threatlens-logo.png">
-  <link rel="stylesheet" href="/static/app.css">
-  <link rel="stylesheet" href="/static/brand.css">
-  <link rel="stylesheet" href="/static/sidebar.css">
-  <link rel="stylesheet" href="/static/account.css">
-  <link rel="stylesheet" href="/static/site-chat.css">
+  <link rel="stylesheet" href="/static/app.css"><link rel="stylesheet" href="/static/brand.css"><link rel="stylesheet" href="/static/sidebar.css"><link rel="stylesheet" href="/static/account.css"><link rel="stylesheet" href="/static/site-chat.css"><link rel="stylesheet" href="/static/about.css">
 </head>
 <body>
-  <header>
-    <div class="brand-area">
-      <img class="brand-logo" src="/static/my-threatlens-logo.png" alt="My ThreatLens">
-      <strong>About</strong>
-    </div>
-  </header>
-  <aside id="appSidebar" class="app-sidebar" aria-label="Main navigation">
-    <span class="sidebar-label">Menu</span>
-    <nav>
-      <a class="button" href="/?open=setups"><span class="nav-icon" aria-hidden="true">▣</span><span>Setups</span></a>
-      <a class="button" href="/?open=import"><span class="nav-icon" aria-hidden="true">⇩</span><span>Import</span></a>
-      <a class="button sidebar-save" href="/"><span class="nav-icon" aria-hidden="true">⌂</span><span>Dashboard</span></a>
-      <a class="button active-nav" href="/about" aria-current="page"><span class="nav-icon" aria-hidden="true">ⓘ</span><span>About</span></a>
-    </nav>
-    <div class="account-panel">
-      <span class="account-label">Signed in as</span>
-      <span class="account-user" title="{{ username }}">{{ username }}</span>
-      <form class="logout-form" method="post" action="/logout"><button class="logout-button" type="submit">Log out</button></form>
-    </div>
-  </aside>
-  <main class="about">
-    <h2>What My ThreatLens does</h2>
-    <p>My ThreatLens helps a cybersecurity analyst monitor selected technologies for relevant vulnerabilities, exploits, and public threat intelligence. It collects matching public-source findings into one temporary review workspace.</p>
-    <h2>How to use the website</h2>
-    <ol>
-      <li><strong>Define your scope:</strong> on the Dashboard, choose the technologies you use, the security keywords you care about, trusted sources, and a publication date range.</li>
-      <li><strong>Run the scan:</strong> after choosing your scope, select <em>Scan Now</em> and wait for the progress indicator to finish. Your choices are applied when the scan starts.</li>
-      <li><strong>Update the search:</strong> change any technology, keyword, source, or date range, then select <em>Scan Now</em> again to replace the old results with a fresh search.</li>
-      <li><strong>Watch for zero-days:</strong> use <em>Scan for Zero Days</em> for a focused scan of zero-day mentions and active-exploitation reports. Its dedicated results stay separate from the normal Scan Now table. This monitors published intelligence; it does not discover unknown vulnerabilities directly on devices.</li>
-      <li><strong>Review the results:</strong> filter by severity, technology, source, CVE, or review state. Open a finding to read its evidence, email it directly, or ask a finding-specific question.</li>
-      <li><strong>Email threats:</strong> use a finding's Email button for one threat, select checkboxes and choose <em>Email selected</em>, or choose <em>Email all found</em> for every result matching the current filters. Pick a ready-made subject and message or edit your own.</li>
-      <li><strong>Share the result:</strong> Export downloads the currently filtered findings as an Excel workbook. Email sends the filtered report only when the site owner has configured an SMTP mail account.</li>
-    </ol>
-    <p><a class="button primary" href="/">Open the Dashboard</a></p>
-    <h2>Browser workspaces and saved data</h2>
-    <p>The site uses one demonstration login, while each browser receives an independent workspace that can contain multiple saved setups. Closing the browser ends the login session, so the username and password are requested again next time. Your saved setups remain available in that browser. Changes on your laptop do not change the setups in another browser or on another computer.</p>
-    <p>Setup configuration also has a browser-specific backup that can help restore it after a temporary hosted-server restart. Findings, review state, and chat messages are temporary and are not saved in browser storage.</p>
-    <h2>Email delivery</h2>
-    <p>Email is optional and must be connected by the site owner through the Zoho Mail API or an available SMTP provider. Until then, use Export and attach the generated Excel report through an approved company channel.</p>
-    <h2>Data privacy</h2>
-    <p>My ThreatLens does not collect user email addresses or create personal accounts. The shared demonstration password is stored as a one-way hash, and login sessions use protected browser cookies. SMTP and AI provider secrets stay in server environment settings and are never exposed to users.</p>
-    <h2>Sources</h2>
-    <p>The application is designed for approved government, vendor, and cybersecurity news feeds. The included offline fixture collector keeps tests deterministic.</p>
-    <h2>AI disclosure</h2>
-    <p>The site-wide assistant and each finding-specific assistant use an open AI model through Ollama. AI-assisted summaries, relevance explanations, and chat responses may be incomplete, outdated, or incorrect. They are decision-support content, not a substitute for professional judgment. Verify every important claim against the linked primary source, vendor advisory, CVE record, and your organization's actual asset inventory before taking action.</p>
-    <h2>Known limitations</h2>
-    <p>Public sources can change, rate-limit, or become unavailable. This build uses deterministic fixtures by default; live collector validation requires network access.</p>
-    <h2>Version and testing status</h2>
-    <p>Version {{ version }}. Automated unit and API tests are included, with results documented in TEST_REPORT.md.</p>
-    <h2>Development</h2>
-    <p>Developed by <strong>Arsen Eliane</strong> with the help of <strong>ChatGPT</strong> as an internship project.</p>
-  </main>
-  {% include "_site_chat.html" %}
-  <script src="/static/site-chat.js"></script>
-</body>
-</html>
+<header><div class="brand-area"><img class="brand-logo" src="/static/my-threatlens-logo.png" alt="My ThreatLens"><strong>About &amp; User Guide</strong></div></header>
+<aside id="appSidebar" class="app-sidebar" aria-label="Main navigation"><span class="sidebar-label">Menu</span><nav><a class="button" href="/?open=setups"><span class="nav-icon">▣</span><span>Setups</span></a><a class="button" href="/?open=import"><span class="nav-icon">⇩</span><span>Import</span></a><a class="button sidebar-save" href="/"><span class="nav-icon">⌂</span><span>Dashboard</span></a><a class="button active-nav" href="/about" aria-current="page"><span class="nav-icon">ⓘ</span><span>About</span></a></nav><div class="account-panel"><span class="account-label">Signed in as</span><span class="account-user" title="{{ username }}">{{ username }}</span><form class="logout-form" method="post" action="/logout"><button class="logout-button" type="submit">Log out</button></form></div></aside>
+<main class="about-guide">
+  <section class="about-hero"><div><span class="eyebrow">Threat intelligence made reviewable</span><h1>See what matters, understand why, and share the evidence.</h1><p>My ThreatLens brings public vulnerability and threat-intelligence updates into one focused workspace for the technologies you actually use.</p><div class="hero-actions"><a class="button primary" href="/">Open Dashboard</a><a class="button download-deck" href="/static/My-ThreatLens-Presentation.pptx" download>Download PowerPoint</a></div></div><div class="hero-lens" aria-hidden="true"><span>Scope</span><b>Scan</b><span>Review</span><i>Share</i></div></section>
+  <nav class="guide-jump" aria-label="About page sections"><a href="#quick-start">Quick start</a><a href="#features">Features</a><a href="#zero-days">Zero-day scan</a><a href="#privacy">Privacy</a><a href="#technical">Technical view</a><a href="#limitations">Limitations</a></nav>
+  <section id="quick-start" class="guide-section"><div class="section-heading"><span>01</span><div><h2>How to use the website</h2><p>A complete scan takes four clear steps.</p></div></div><div class="steps-grid"><article><b>1</b><h3>Define your scope</h3><p>Choose the technologies you use, security keywords, trusted sources, and publication date range.</p></article><article><b>2</b><h3>Run a scan</h3><p>Select <em>Scan Now</em>. The progress indicator shows collection and analysis status.</p></article><article><b>3</b><h3>Review and prioritize</h3><p>Filter by severity, technology, source, CVE, or review state. Open a finding to inspect its evidence.</p></article><article><b>4</b><h3>Share the result</h3><p>Email one threat, selected threats, or the filtered report. Export the current view as an Excel workbook.</p></article></div><div class="callout"><strong>Important:</strong> If you change the scope, run the scan again. Existing results are not silently mixed with the new selection.</div></section>
+  <section id="features" class="guide-section"><div class="section-heading"><span>02</span><div><h2>What you can do</h2><p>From monitoring to a supervisor-ready report.</p></div></div><div class="feature-grid"><article><span>◎</span><h3>Multiple setups</h3><p>Save different monitoring scopes for different systems, teams, or technology stacks.</p></article><article><span>⚑</span><h3>Biggest threat</h3><p>The dashboard highlights the highest-priority current finding and lets you email it alone.</p></article><article><span>⌕</span><h3>Focused filtering</h3><p>Find a specific severity, platform, CVE, source, or review status without rescanning.</p></article><article><span>✉</span><h3>Relevant email</h3><p>Send a compact report containing the essential risk, evidence, affected technology, and source.</p></article><article><span>⇩</span><h3>Excel export</h3><p>Download the visible filtered results for offline review and approved sharing channels.</p></article><article><span>✦</span><h3>AI assistance</h3><p>Ask about the whole workspace or one finding while keeping the cited source as the authority.</p></article></div></section>
+  <section id="zero-days" class="guide-section split-section"><div><div class="section-heading"><span>03</span><div><h2>Zero-day &amp; active-exploitation scan</h2><p>A separate priority view for urgent published intelligence.</p></div></div><p>Select <em>Scan for Zero Days</em> to look specifically for explicit zero-day reporting, CISA Known Exploited Vulnerabilities signals, active exploitation, and public proof-of-concept reporting that matches your scope.</p><ul class="check-list"><li>Results stay separate from the normal findings table.</li><li>Metrics distinguish explicit zero-days from active-exploitation signals.</li><li>Source coverage shows whether the selected feeds answered successfully.</li><li>A failed source produces an unavailable warning—not a false “safe” conclusion.</li></ul></div><aside class="truth-card"><span>What it does not do</span><h3>It does not scan your devices.</h3><p>My ThreatLens monitors published intelligence. Confirm exposure with your asset inventory, affected-version checks, vendor guidance, and approved security tools.</p></aside></section>
+  <section id="privacy" class="guide-section"><div class="section-heading"><span>04</span><div><h2>Login, workspaces, and privacy</h2><p>Shared access with an independent workspace for every browser.</p></div></div><div class="privacy-flow"><article><h3>Login every browser session</h3><p>Closing the browser ends the login session. The shared username and password are requested again on the next visit.</p></article><span>→</span><article><h3>Independent workspace</h3><p>Each browser receives its own workspace, so one computer's setups do not change another computer's setups.</p></article><span>→</span><article><h3>Setups remain available</h3><p>Saved setup configuration has a browser-specific backup. Findings, reviews, and chat messages remain temporary.</p></article></div><p class="privacy-note">My ThreatLens does not collect user email addresses or create personal accounts. The shared password is stored as a one-way hash. Provider secrets remain in protected server environment settings.</p></section>
+  <section id="technical" class="guide-section"><div class="section-heading"><span>05</span><div><h2>How it works technically</h2><p>A lightweight web pipeline designed for a controlled demonstration.</p></div></div><div class="architecture"><div><b>1</b><span>Browser scope</span><small>technologies · sources · dates</small></div><i>→</i><div><b>2</b><span>FastAPI service</span><small>authentication · scans · API</small></div><i>→</i><div><b>3</b><span>Collectors</span><small>government · vendor · news feeds</small></div><i>→</i><div><b>4</b><span>Analysis</span><small>matching · severity · prioritization</small></div><i>→</i><div><b>5</b><span>Output</span><small>dashboard · email · Excel · AI</small></div></div><div class="technical-cards"><article><h3>Email delivery</h3><p>Email uses the configured Zoho Mail API or SMTP provider. If delivery is unavailable, export the Excel report and share it through an approved company channel.</p></article><article><h3>AI disclosure</h3><p>AI-assisted summaries, relevance explanations, and chat responses may be incomplete, outdated, or incorrect. Verify important claims against the linked primary source, vendor advisory, CVE record, and actual asset inventory.</p></article><article><h3>Testing</h3><p>Automated unit and API tests cover authentication, browser workspace isolation, scan behavior, matching, email formatting, exports, and assistant fallbacks.</p></article></div></section>
+  <section id="limitations" class="guide-section final-section"><div class="section-heading"><span>06</span><div><h2>Use it responsibly</h2><p>Decision support—not an automatic security verdict.</p></div></div><div class="limitations-grid"><p><strong>Source availability:</strong> public feeds can change, rate-limit, or become temporarily unavailable.</p><p><strong>Coverage:</strong> a missing article is not proof that a technology has no vulnerability.</p><p><strong>Validation:</strong> use primary advisories and your asset inventory before remediation decisions.</p><p><strong>AI:</strong> treat generated text as an assistant's interpretation, never as the original evidence.</p></div><div class="about-footer"><div><img src="/static/my-threatlens-logo.png" alt=""><p>Version {{ version }} · Developed by <strong>Arsen Eliane</strong> with the help of <strong>ChatGPT</strong> as an internship project.</p></div><a class="button download-deck" href="/static/My-ThreatLens-Presentation.pptx" download>Download PowerPoint</a></div></section>
+</main>
+{% include "_site_chat.html" %}<script src="/static/site-chat.js"></script>
+</body></html>

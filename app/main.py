@@ -40,7 +40,7 @@ INSTANCE_ID=str(uuid.uuid4())
 SESSION_COOKIE="mythreatlens_session"
 WORKSPACE_COOKIE="threatlens_client"
 SESSION_DAYS=30
-ZERO_DAY_SCAN_KEYWORDS=["Zero-Day","Active Exploitation","Exploit","CISA KEV","Proof of Concept"]
+ZERO_DAY_SCAN_KEYWORDS=["Zero-Day","Active Exploitation","CISA KEV","Proof of Concept"]
 AUTOMATIC_EMAIL_STATUS={"enabled":False,"last_daily_sent_at":None,"last_critical_sent_at":None,"last_error":None}
 AUTOMATICALLY_ALERTED_FINGERPRINTS=set()
 AUTOMATION_SCHEDULER=None
@@ -462,7 +462,12 @@ async def run_scan(scan_id):
     with SessionLocal() as db:
         setup=db.get(Setup,scan["setup_id"]); sources=list(setup.sources); scan_days=int(setup.date_range[:-1]) if setup.date_range.endswith("d") and setup.date_range[:-1].isdigit() else 120
         scan.update(status="running",progress=5,message="Collecting zero-day intelligence" if zero_day_mode else "Collecting approved sources")
-    collected=await asyncio.gather(*(collect_source(source,settings.request_timeout_seconds,settings.max_results_per_source,settings.live_collectors_enabled,scan_days) for source in sources))
+    async def collect_safely(source):
+        try:
+            return await collect_source(source,settings.request_timeout_seconds,settings.max_results_per_source,settings.live_collectors_enabled,scan_days)
+        except Exception:
+            return [],"unavailable: collector failed safely"
+    collected=await asyncio.gather(*(collect_safely(source) for source in sources))
     with SessionLocal() as db:
         setup=db.get(Setup,scan["setup_id"]); results=[]; added=0; added_in_range=0; scan_now=datetime.now(timezone.utc); live_sources=0; seen_fingerprints=set(); source_states=[]; zero_day_mentions=0; active_exploitation=0; critical_priority=0
         all_technologies_selected=set(TECH_ALIASES).issubset(setup.technologies)
@@ -487,7 +492,7 @@ async def run_scan(scan_id):
                     added_in_range+=1
                     if zero_day_mode:
                         zero_day_mentions+=int(bool(re.search(r"\b(?:zero[- ]day|0-day)\b",text,re.I)))
-                        active_exploitation+=int(bool(raw.get("kev",False) or re.search(r"\b(?:actively exploited|active exploitation|under active (?:attack|exploitation)|exploited in the wild)\b",text,re.I)))
+                        active_exploitation+=int(bool(raw.get("kev",False) or re.search(r"\b(?:actively exploited|active exploitation|under active (?:attack|exploitation)|exploited in the wild|exploitation (?:has been )?observed|attacks? exploiting)\b",text,re.I)))
                         critical_priority+=int(sev=="Critical")
             scan["progress"]=min(95,10+int((idx+1)/max(len(sources),1)*80))
         if zero_day_mode:
@@ -537,7 +542,8 @@ def findings(request:Request,page:int=1,page_size:int=settings.results_page_size
 @app.get("/api/zero-day-findings")
 def zero_day_findings(request:Request,db:Session=Depends(get_db)):
     setup=ensure_workspace(db,request.state.client_id); rows=scoped_zero_day_findings(setup)
-    return {"items":[serial_finding(f) for f in rows],"total":len(rows),"scanned":setup.id in ZERO_DAY_FINDINGS_CACHE}
+    latest=max((scan for scan in SCANS_CACHE.values() if scan.get("setup_id")==setup.id and scan.get("kind")=="zero_day"),key=lambda scan:scan["id"],default=None)
+    return {"items":[serial_finding(f) for f in rows],"total":len(rows),"scanned":setup.id in ZERO_DAY_FINDINGS_CACHE,"metrics":(latest or {}).get("metrics",{}),"sources":(latest or {}).get("sources",[])}
 @app.get("/api/automatic-email/status")
 def automatic_email_status():
     recipient=settings.automatic_email_recipient.strip()

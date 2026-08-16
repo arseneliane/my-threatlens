@@ -53,6 +53,10 @@ def test_home_active_name(client):
     assert "How to use the website" in about.text and "Define your scope" in about.text
     assert "AI-assisted summaries" in about.text and "independent workspace" in about.text
     assert "does not collect user email addresses" in about.text and "one-way hash" in about.text
+    assert 'href="/static/My-ThreatLens-Presentation.pptx"' in about.text
+    assert "Download PowerPoint" in about.text
+    assert client.get("/static/My-ThreatLens-Presentation.pptx").status_code==200
+    assert client.get("/static/about.css").status_code==200
     assert "Arsen Eliane" in about.text and "ChatGPT" in about.text and "internship project" in about.text
     assert "Alfa" not in about.text and "Information Security Department" not in about.text
     assert 'new URLSearchParams(location.search).get("open")' in js.text
@@ -239,6 +243,7 @@ def test_zero_day_addon_scans_independently_of_regular_keywords(client):
     zero_day_findings=client.get("/api/zero-day-findings").json()
     assert normal_findings["total"]==0
     assert zero_day_findings["scanned"] is True and zero_day_findings["total"]==status["findings_count"]
+    assert zero_day_findings["metrics"]==status["metrics"] and len(zero_day_findings["sources"])==1
     assert all("SQL Injection" not in finding["matched_keywords"] for finding in zero_day_findings["items"])
     normal_scan=client.post("/api/scans").json()
     for _ in range(30):
@@ -247,6 +252,22 @@ def test_zero_day_addon_scans_independently_of_regular_keywords(client):
         time.sleep(.03)
     assert client.get("/api/findings").json()["total"]==0
     assert client.get("/api/zero-day-findings").json()["total"]==zero_day_findings["total"]
+
+def test_zero_day_scan_completes_safely_when_a_collector_crashes(client,monkeypatch):
+    from app import main
+    async def broken_collector(*args,**kwargs): raise RuntimeError("network failure")
+    monkeypatch.setattr(main,"collect_source",broken_collector)
+    client.post("/api/setups",json={"name":"Resilient Zero-Day","technologies":["Windows 11"],"keywords":["CVE"],"sources":["CISA"],"date_range":"7d"})
+    queued=client.post("/api/scans/zero-days").json()
+    for _ in range(30):
+        status=client.get(f'/api/scans/{queued["scan_id"]}').json()
+        if status["status"]=="completed": break
+        time.sleep(.03)
+    assert status["status"]=="completed" and status["findings_count"]==0
+    assert status["metrics"]["sources_checked"]==1 and status["metrics"]["live_sources"]==0
+    assert status["sources"][0]["status"]=="unavailable"
+    results=client.get("/api/zero-day-findings").json()
+    assert results["scanned"] is True and results["total"]==0
 def test_delete_setup_with_scan_history(client):
     data={"name":"Delete With History","technologies":["FortiGate"],"keywords":["Exploit"],"sources":["CISA"],"date_range":"7d"}
     setup=client.post("/api/setups",json=data).json()
