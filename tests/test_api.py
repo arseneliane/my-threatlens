@@ -25,6 +25,9 @@ def test_home_active_name(client):
     assert "/static/my-threatlens-logo.png" in r.text
     assert client.get("/static/my-threatlens-logo.png").status_code==200
     assert 'id="appSidebar"' in r.text and "function toggleSidebar()" in js.text
+    sidebar=r.text.split('<aside id="appSidebar"',1)[1].split('</aside>',1)[0]
+    assert "Automatic Email" not in sidebar
+    assert "✉ Automatic Email" in js.text and "openAutomaticEmail(${s.id}" in js.text
     assert 'id="autosaveLabel"' not in r.text and "Saved automatically" not in r.text
     assert "function scheduleAutoSave()" not in js.text and "function selectorDraftChanged()" in js.text
     assert 'onchange="selectorDraftChanged()"' in js.text and "if(!await saveSetup())return" in js.text
@@ -160,6 +163,18 @@ def test_automatic_email_settings_are_saved_per_setup(client):
     assert saved.json()["critical_enabled"] is False
     too_many=client.put("/api/automatic-email",json={"recipients":[f"user{i}@example.com" for i in range(11)]})
     assert too_many.status_code==422
+
+def test_automatic_email_is_independent_for_each_setup(client):
+    first=next(setup for setup in client.get("/api/setups").json() if setup["active"])
+    second=client.post("/api/setups",json={"name":"Separate Team","technologies":["Windows 11"],"keywords":["CVE"],"sources":["CISA"],"date_range":"7d"}).json()
+    saved_first=client.put(f'/api/automatic-email?setup_id={first["id"]}',json={"recipients":["first@example.com"],"subject":"First setup","message":"First team message."})
+    saved_second=client.put(f'/api/automatic-email?setup_id={second["id"]}',json={"recipients":["second@example.com","backup@example.com"],"subject":"Second setup","message":"Second team message."})
+    assert saved_first.status_code==saved_second.status_code==200
+    first_config=client.get(f'/api/automatic-email?setup_id={first["id"]}').json()
+    second_config=client.get(f'/api/automatic-email?setup_id={second["id"]}').json()
+    assert first_config["recipients"]==["first@example.com"] and first_config["setup_name"]==first["name"]
+    assert second_config["recipients"]==["second@example.com","backup@example.com"] and second_config["setup_name"]==second["name"]
+    assert client.get("/api/automatic-email?setup_id=999999").status_code==404
 
 def test_automatic_scheduler_has_daily_and_30_minute_jobs(client):
     from app import main

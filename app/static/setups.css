@@ -129,6 +129,8 @@
 
 .setup-actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 7px;
   flex-shrink: 0;
 }
@@ -141,6 +143,13 @@
 .load-setup {
   border-color: var(--blue);
   color: var(--blue);
+  font-weight: 700;
+}
+
+.setup-email {
+  border-color: #8ecdc6;
+  background: #eaf9f7;
+  color: var(--teal);
   font-weight: 700;
 }
 
@@ -171,6 +180,10 @@
   .setup-actions {
     display: grid;
     grid-template-columns: 1fr 1fr;
+  }
+
+  .setup-email {
+    grid-column: 1 / -1;
   }
 
   .delete-setup {

@@ -568,14 +568,20 @@ def automatic_email_status():
     recipient=settings.automatic_email_recipient.strip()
     masked=(recipient[:2]+"…@"+recipient.split("@",1)[1]) if "@" in recipient else ""
     return {**AUTOMATIC_EMAIL_STATUS,"recipient":masked,"timezone":settings.automatic_email_timezone,"daily_time":f"{settings.automatic_email_hour:02d}:{settings.automatic_email_minute:02d}","scan_interval_minutes":settings.scan_interval_seconds//60,"critical_alerts":settings.critical_email_enabled}
+
+def automation_setup(db,request,setup_id=None):
+    setup=owned_setup(db,request.state.client_id,setup_id) if setup_id is not None else ensure_workspace(db,request.state.client_id)
+    if not setup: raise HTTPException(404,"Setup not found.")
+    return setup
+
 @app.get("/api/automatic-email")
-def get_automatic_email(request:Request,db:Session=Depends(get_db)):
-    setup=ensure_workspace(db,request.state.client_id)
+def get_automatic_email(request:Request,setup_id:int|None=None,db:Session=Depends(get_db)):
+    setup=automation_setup(db,request,setup_id)
     config=db.scalar(select(EmailAutomation).where(EmailAutomation.setup_id==setup.id))
-    return {"recipients":list(config.recipients or []) if config else [],"daily_enabled":config.daily_enabled if config else True,"critical_enabled":config.critical_enabled if config else True,"subject":config.subject if config else "My ThreatLens security alert","message":config.message if config else "Kindly review the threats below and take the required action.","timezone":settings.automatic_email_timezone,"daily_time":f"{settings.automatic_email_hour:02d}:{settings.automatic_email_minute:02d}","scan_interval_minutes":settings.scan_interval_seconds//60}
+    return {"setup_id":setup.id,"setup_name":setup.display_name,"recipients":list(config.recipients or []) if config else [],"daily_enabled":config.daily_enabled if config else True,"critical_enabled":config.critical_enabled if config else True,"subject":config.subject if config else "My ThreatLens security alert","message":config.message if config else "Kindly review the threats below and take the required action.","timezone":settings.automatic_email_timezone,"daily_time":f"{settings.automatic_email_hour:02d}:{settings.automatic_email_minute:02d}","scan_interval_minutes":settings.scan_interval_seconds//60}
 @app.put("/api/automatic-email")
-def save_automatic_email(data:EmailAutomationIn,request:Request,db:Session=Depends(get_db)):
-    setup=ensure_workspace(db,request.state.client_id)
+def save_automatic_email(data:EmailAutomationIn,request:Request,setup_id:int|None=None,db:Session=Depends(get_db)):
+    setup=automation_setup(db,request,setup_id)
     recipients=[]
     for raw in data.recipients:
         recipient=raw.strip().lower()
@@ -594,10 +600,10 @@ def save_automatic_email(data:EmailAutomationIn,request:Request,db:Session=Depen
     config.recipients=recipients; config.daily_enabled=data.daily_enabled; config.critical_enabled=data.critical_enabled
     config.subject=subject or "My ThreatLens security alert"; config.message=message or "Kindly review the threats below and take the required action."
     db.commit()
-    return get_automatic_email(request,db)
+    return get_automatic_email(request,setup.id,db)
 @app.post("/api/automatic-email/test")
-async def test_automatic_email(request:Request,db:Session=Depends(get_db)):
-    setup=ensure_workspace(db,request.state.client_id)
+async def test_automatic_email(request:Request,setup_id:int|None=None,db:Session=Depends(get_db)):
+    setup=automation_setup(db,request,setup_id)
     config=db.scalar(select(EmailAutomation).where(EmailAutomation.setup_id==setup.id))
     recipients=list(config.recipients or []) if config else []
     if not recipients: raise HTTPException(422,"Save at least one recipient before sending a test.")
