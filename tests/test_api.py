@@ -13,9 +13,9 @@ def test_home_active_name(client):
     assert "function formatPublicationDate(value)" in js.text and 'timeZoneName:"short"' in js.text
     assert "active-pill" in js.text and client.get("/static/setups.css").status_code==200
     assert "function setScanVisual" in js.text and client.get("/static/scan.css").status_code==200
-    assert "shield-shape" in r.text and "Click Scan Now" in r.text
-    assert "Autoscan every 30 min" in r.text and "window.scanIntervalSeconds" in r.text
-    assert "function updateAutoScanCountdown()" in js.text and "await startScan()" in js.text
+    assert "shield-shape" in r.text and "click Scan Now" in r.text
+    assert "Results update when you click Scan Now" in r.text and "window.scanIntervalSeconds" not in r.text
+    assert "function updateAutoScanCountdown()" not in js.text and "await startScan()" not in js.text
     assert 'id="zeroDayScanBtn"' in r.text and "Scan for Zero Days" in r.text
     assert "function startZeroDayScan()" in js.text and "/api/scans/zero-days" in js.text
     assert 'id="zeroDayResults"' in r.text and "/api/zero-day-findings" in js.text
@@ -24,10 +24,10 @@ def test_home_active_name(client):
     assert "/static/my-threatlens-logo.png" in r.text
     assert client.get("/static/my-threatlens-logo.png").status_code==200
     assert 'id="appSidebar"' in r.text and "function toggleSidebar()" in js.text
-    assert 'id="autosaveLabel"' in r.text and "Saved automatically" in r.text
-    assert "function scheduleAutoSave()" in js.text and "function selectorDraftChanged()" in js.text
-    assert 'onchange="selectorDraftChanged()"' in js.text and "if(!await saveSetup(true))return" in js.text
-    assert "Selections save automatically." in r.text
+    assert 'id="autosaveLabel"' not in r.text and "Saved automatically" not in r.text
+    assert "function scheduleAutoSave()" not in js.text and "function selectorDraftChanged()" in js.text
+    assert 'onchange="selectorDraftChanged()"' in js.text and "if(!await saveSetup())return" in js.text
+    assert "Your choices will be used when you click Scan Now." in r.text
     assert client.get("/static/sidebar.css").status_code==200
     assert client.get("/static/review.css").status_code==200
     assert "Checklist" not in js.text and "function saveChecklist(id)" not in js.text
@@ -58,7 +58,7 @@ def test_home_active_name(client):
     assert 'new URLSearchParams(location.search).get("open")' in js.text
     assert 'link.download=`My-ThreatLens-Results-${stamp}.xlsx`' in js.text
     assert "scopeDirty=true" in js.text and "showPendingScopeState()" in js.text
-    assert "Saving setup changes. Findings will refresh automatically." in js.text
+    assert "Your search choices changed. Click Scan Now to get updated results." in js.text
     assert "Scanning selected sources for fresh findings" in js.text
     assert "Your additions" in js.text and "function addCustomOption()" in js.text and "function removeCustomOption(value)" in js.text
     assert 'class="manual-option-chip"' in js.text and client.get("/static/selector-custom.css").status_code==200
