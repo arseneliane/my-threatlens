@@ -4,13 +4,13 @@ My ThreatLens is a local cybersecurity-intelligence workspace. Users create acco
 
 ## Start on Windows
 
-1. Install Python 3.11 or newer.
-2. Download or clone the `codex/local-edition` branch.
-3. Double-click `START_MY_THREATLENS.bat`.
+1. Download or clone the `codex/local-edition` branch.
+2. Double-click `START_MY_THREATLENS.bat`.
+3. Enter the Zoho sending address and its app password when prompted.
 4. Open `http://127.0.0.1:8001` if the browser does not open automatically.
 5. Select **Create account**, then choose a unique username and strong password.
 
-The launcher creates `.venv`, installs the required packages, copies `.env.example` to `.env` when needed, and starts FastAPI on port 8001.
+On a standard Windows 10/11 installation with Windows Package Manager, the launcher installs Python and Ollama when missing, selects `deepseek-r1:7b` for systems with at least 16 GB RAM or `deepseek-r1:1.5b` for smaller systems, downloads the model, creates `.venv`, installs Python packages, writes the local `.env`, and starts FastAPI on port 8001. The first launch requires internet access and several gigabytes of free disk space. Company policy may require IT approval for software installation.
 
 ## Local persistence
 
@@ -37,6 +37,8 @@ OLLAMA_API_KEY=
 ```
 
 Place the administrator's key after `OLLAMA_API_KEY=`. The rest of the application continues to work if Ollama is not configured.
+
+The first launcher prepares local DeepSeek automatically. To switch later without editing `.env`, run `USE_OLLAMA_API.bat` and enter the API key. Run `USE_LOCAL_OLLAMA.bat` to return to the automatically selected local DeepSeek model.
 
 ## Email configuration
 

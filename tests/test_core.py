@@ -107,6 +107,17 @@ def test_html_email_contains_findings_without_excel_attachment():
     assert "my-threatlens-shield.png" in html and 'alt="My ThreatLens shield"' in html
     assert "<table" not in html and "2026-" in html
 
+def test_turnkey_local_setup_keeps_both_ollama_modes():
+    from pathlib import Path
+    root=Path(__file__).resolve().parents[1]
+    first_run=(root/"scripts"/"first_run_setup.ps1").read_text(encoding="utf-8")
+    mode_setup=(root/"scripts"/"set_ollama_mode.ps1").read_text(encoding="utf-8")
+    launcher=(root/"START_MY_THREATLENS.bat").read_text(encoding="utf-8")
+    assert "Ollama.Ollama" in first_run and "deepseek-r1:7b" in first_run and "deepseek-r1:1.5b" in first_run
+    assert "SMTP_PASSWORD" in first_run and "first_run_setup.ps1" in launcher
+    assert "https://ollama.com" in mode_setup and "http://127.0.0.1:11434" in mode_setup
+    assert (root/"USE_OLLAMA_API.bat").exists() and (root/"USE_LOCAL_OLLAMA.bat").exists()
+
 def test_zoho_https_email_delivery(monkeypatch):
     from datetime import datetime,timezone
     from app.services import email as email_service

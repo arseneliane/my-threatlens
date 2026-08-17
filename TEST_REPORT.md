@@ -3,7 +3,7 @@
 Verified on 2026-08-17 with Python 3.12:
 
 ```text
-55 passed, 5 warnings in 6.47s
+56 passed, 5 warnings in 10.15s
 ```
 
 The warnings are upstream deprecation notices for FastAPI startup events and the TestClient compatibility layer; they are not test failures.

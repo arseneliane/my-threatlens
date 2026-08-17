@@ -1,9 +1,11 @@
 @echo off
 setlocal
 cd /d "%~dp0"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\first_run_setup.ps1" -ProjectRoot "%~dp0" || goto :error
 set "PYTHON_CMD="
 where py >nul 2>&1 && set "PYTHON_CMD=py -3"
 if not defined PYTHON_CMD where python >nul 2>&1 && set "PYTHON_CMD=python"
+if not defined PYTHON_CMD if exist "%LOCALAPPDATA%\Programs\Python\Python312\python.exe" set "PYTHON_CMD=%LOCALAPPDATA%\Programs\Python\Python312\python.exe"
 if not defined PYTHON_CMD (
   echo Python 3.11 or newer is required. Install it from https://www.python.org/downloads/
   pause
@@ -20,7 +22,11 @@ if not exist ".venv\Scripts\python.exe" (
   %PYTHON_CMD% -m venv .venv || goto :error
 )
 .venv\Scripts\python.exe -m pip install -r requirements.txt --disable-pip-version-check -q || goto :error
-if not exist ".env" copy ".env.example" ".env" >nul
+if not exist ".env" (
+  echo Configuration was not created. Run this file again.
+  pause
+  exit /b 1
+)
 echo Checking for an older My ThreatLens server...
 powershell -NoProfile -Command "$listener=Get-NetTCPConnection -LocalPort 8001 -State Listen -ErrorAction SilentlyContinue; if($listener){$process=Get-CimInstance Win32_Process -Filter ('ProcessId='+$listener.OwningProcess); if($process.CommandLine -match 'uvicorn.+app\.main:app'){Write-Host 'Stopping the older My ThreatLens server...'; Stop-Process -Id $listener.OwningProcess -Force; Start-Sleep -Seconds 1}else{Write-Host 'Port 8001 is used by another application.'; exit 42}}"
 if errorlevel 42 (
