@@ -13,7 +13,7 @@ ZOHO_TOKEN_CACHE={"access_token":"","expires_at":0.0,"account_id":""}
 
 class EmailDeliveryError(Exception): pass
 
-def render_findings_html(findings,setup,intro=""):
+def render_findings_html(findings,setup,intro="",logo_url="https://my-threatlens-demo.onrender.com/static/my-threatlens-shield.png"):
     counts=Counter(f.severity for f in findings)
     count_text=" · ".join(f"{escape(level)} {counts[level]}" for level in ("Critical","High","Medium","Low","Informational") if counts[level]) or "No matching findings"
     cards=[]
@@ -24,7 +24,9 @@ def render_findings_html(findings,setup,intro=""):
     setup_name=getattr(setup,"display_name",setup.name)
     intro_html=f'<p style="margin:0 0 18px;color:#526b7a">{escape(intro.strip())}</p>' if intro.strip() else ""
     threat_label="threat" if len(findings)==1 else "threats"
-    return f'''<!doctype html><html><body style="margin:0;background:#f4f8fa;font:14px Arial,sans-serif;color:#183042"><div style="max-width:700px;margin:auto;background:#fff"><div style="padding:22px 24px;background:#075985;color:#fff"><h1 style="font-size:21px;margin:0 0 5px">My ThreatLens</h1><div>Security findings brief · {escape(setup_name)}</div></div><div style="padding:22px 24px">{intro_html}<div style="padding:12px 14px;background:#eef5f8;border-radius:8px"><strong>{len(findings)} selected {threat_label}</strong><div style="color:#526b7a;font-size:12px;margin-top:4px">{count_text}</div></div><div>{findings_html}</div><p style="margin-top:22px;color:#64748b;font-size:11px">Verify each finding against its linked primary source and your organization's asset inventory.</p></div></div></body></html>'''
+    safe_logo_url=escape(logo_url.rstrip("/") if logo_url else "",quote=True)
+    logo_html=f'<img src="{safe_logo_url}" width="54" height="54" alt="My ThreatLens shield" style="display:block;width:54px;height:54px;object-fit:contain;border:0">' if safe_logo_url else ""
+    return f'''<!doctype html><html><body style="margin:0;background:#f4f8fa;font:14px Arial,sans-serif;color:#183042"><div style="max-width:700px;margin:auto;background:#fff"><div style="padding:18px 24px;background:#075985;color:#fff"><div style="display:flex;align-items:center;gap:13px">{logo_html}<div><h1 style="font-size:21px;margin:0 0 5px">My ThreatLens</h1><div>Security findings brief · {escape(setup_name)}</div></div></div></div><div style="padding:22px 24px">{intro_html}<div style="padding:12px 14px;background:#eef5f8;border-radius:8px"><strong>{len(findings)} selected {threat_label}</strong><div style="color:#526b7a;font-size:12px;margin-top:4px">{count_text}</div></div><div>{findings_html}</div><p style="margin-top:22px;color:#64748b;font-size:11px">Verify each finding against its linked primary source and your organization's asset inventory.</p></div></div></body></html>'''
 
 def zoho_configured(settings):
     return all((settings.zoho_client_id,settings.zoho_client_secret,settings.zoho_refresh_token,settings.zoho_from_email))
@@ -73,7 +75,8 @@ def send_findings_email(settings,recipient,subject,body,findings,setup):
     recipient=recipient.strip(); subject=subject.strip()
     if not EMAIL_PATTERN.fullmatch(recipient): raise ValueError("Enter a valid recipient email address.")
     if not subject or "\r" in subject or "\n" in subject: raise ValueError("Enter a valid email subject.")
-    html=render_findings_html(findings,setup,body)
+    base_url=getattr(settings,"public_base_url","https://my-threatlens-demo.onrender.com").rstrip("/")
+    html=render_findings_html(findings,setup,body,f"{base_url}/static/my-threatlens-shield.png")
     if zoho_configured(settings):
         send_via_zoho(settings,recipient,subject,html); return
     if not settings.smtp_host or not settings.smtp_from_email:

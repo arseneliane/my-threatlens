@@ -16,6 +16,8 @@ services:
         value: sqlite:////tmp/my_threatlens.db
       - key: SECURE_COOKIES
         value: "true"
+      - key: PUBLIC_BASE_URL
+        value: https://my-threatlens-demo.onrender.com
       - key: SHARED_USERNAME
         value: cyber expert
       - key: SHARED_PASSWORD

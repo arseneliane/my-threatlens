@@ -104,6 +104,7 @@ def test_html_email_contains_findings_without_excel_attachment():
     assert "Critical Windows flaw" in html and "CVE-2026-1234" in html and "Security report" in html
     assert "spreadsheet" not in html.lower()
     assert "Security findings brief" in html and "Remote code execution is possible" not in html
+    assert "my-threatlens-shield.png" in html and 'alt="My ThreatLens shield"' in html
     assert "<table" not in html and "2026-" in html
 
 def test_zoho_https_email_delivery(monkeypatch):
