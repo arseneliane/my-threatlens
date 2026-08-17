@@ -190,7 +190,7 @@ async def ollama_site_answer(setup,findings,history,settings):
             response=await client.post(settings.ollama_url.rstrip("/")+"/api/chat",json=payload,headers=ollama_headers(settings))
             response.raise_for_status()
     except httpx.ConnectError as exc:
-        raise RuntimeError("Ollama is not reachable. Check the hosted Ollama configuration, then try again.") from exc
+        raise RuntimeError("Ollama is not reachable. Start local Ollama or check OLLAMA_URL and OLLAMA_API_KEY, then try again.") from exc
     except httpx.TimeoutException as exc:
         raise RuntimeError("The AI model took too long to respond. Please try again.") from exc
     except httpx.HTTPStatusError as exc:

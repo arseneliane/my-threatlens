@@ -13,7 +13,7 @@ ZOHO_TOKEN_CACHE={"access_token":"","expires_at":0.0,"account_id":""}
 
 class EmailDeliveryError(Exception): pass
 
-def render_findings_html(findings,setup,intro="",logo_url="https://my-threatlens-demo.onrender.com/static/my-threatlens-shield.png"):
+def render_findings_html(findings,setup,intro="",logo_url="http://127.0.0.1:8001/static/my-threatlens-shield.png"):
     counts=Counter(f.severity for f in findings)
     count_text=" · ".join(f"{escape(level)} {counts[level]}" for level in ("Critical","High","Medium","Low","Informational") if counts[level]) or "No matching findings"
     cards=[]
@@ -75,7 +75,7 @@ def send_findings_email(settings,recipient,subject,body,findings,setup):
     recipient=recipient.strip(); subject=subject.strip()
     if not EMAIL_PATTERN.fullmatch(recipient): raise ValueError("Enter a valid recipient email address.")
     if not subject or "\r" in subject or "\n" in subject: raise ValueError("Enter a valid email subject.")
-    base_url=getattr(settings,"public_base_url","https://my-threatlens-demo.onrender.com").rstrip("/")
+    base_url=getattr(settings,"public_base_url","http://127.0.0.1:8001").rstrip("/")
     html=render_findings_html(findings,setup,body,f"{base_url}/static/my-threatlens-shield.png")
     if zoho_configured(settings):
         send_via_zoho(settings,recipient,subject,html); return

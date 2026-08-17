@@ -1,3 +1,9 @@
 # User Guide
 
-Log in with the shared demonstration username `cyber expert` and the password provided privately by the site owner. Closing the browser ends the login session, so it asks again when reopened. Each browser still preserves its own independent setups. Choose technologies, keywords, sources, and a date range, then select Scan Now. If you change the scope, select Scan Now again to replace the previous results with a fresh search. Values typed under Your additions become removable chips. Scan for Zero Days uses its own separate focused-results section. Use table filters without rescanning. Open Review to inspect a threat and ask grounded questions. Use a row's Email button for one threat, select several checkboxes and choose Email selected, or choose Email all found for the complete filtered result set. Export Excel downloads exactly the currently filtered result set.
+Open `http://127.0.0.1:8001` and create an account with a unique username and strong password. No email address is required. Every account has independent setups stored in the local SQLite database.
+
+Choose technologies, keywords, sources, and a date range, then select **Scan Now**. Run another scan after changing the scope. **Scan for Zero Days** creates a separate focused view of published zero-day and active-exploitation intelligence; it does not scan devices.
+
+Filter findings, open **Review**, use either AI assistant when Ollama is configured, email one or more findings when mail is configured, or export the current filtered result to Excel.
+
+Each setup has independent automatic-email recipients and options. Scheduled scans and messages continue with the browser closed, provided the computer, internet connection, and My ThreatLens server remain running.

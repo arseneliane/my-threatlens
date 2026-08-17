@@ -3,9 +3,10 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.tmp/
+.test-packages/
 data/*.db
 data/*.db-*
 *.zip
 .DS_Store
 Thumbs.db
-

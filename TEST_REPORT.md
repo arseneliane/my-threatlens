@@ -1,20 +1,20 @@
 # Test Report
 
-Verified on 2026-08-16 with Python 3.12:
+Verified on 2026-08-17 with Python 3.12:
 
 ```text
-49 passed, 5 warnings in 11.74s
+55 passed, 5 warnings in 6.47s
 ```
 
-The warnings are upstream deprecation notices for FastAPI's startup-event API and the TestClient/httpx compatibility layer; they do not represent test failures.
+The warnings are upstream deprecation notices for FastAPI startup events and the TestClient compatibility layer; they are not test failures.
 
-HTTP smoke test:
+The suite covers account registration, password validation and hashing, login/logout, account-scoped setup persistence, scan completion, filtering, exports, imports, scheduler registration, setup-specific automatic email, Zoho delivery, and Ollama assistant fallbacks.
+
+Local HTTP smoke verification:
 
 ```text
-GET /login       200 (My ThreatLens slogan and shared login form present)
-GET /             303 to /login when signed out; 200 when signed in
-GET /about        200 when signed in
-GET /api/setups   401 when signed out; 200 when signed in
+GET  /login          200
+POST /register       303, followed by authenticated dashboard 200
+GET  /api/workspace  200 with the new account and Default Setup
+Listener             http://127.0.0.1:8001
 ```
-
-Live external collectors were intentionally not exercised during the automated suite; deterministic fixtures cover alias matching, source normalization, scan completion, filtered-export parity, shared-password hashing, login/logout, browser-workspace isolation, setup-cache restoration, Zoho HTTPS email delivery, and isolated site-wide/per-finding AI conversations.

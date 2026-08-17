@@ -1,44 +1,50 @@
-# My ThreatLens
+# My ThreatLens — Local Edition
 
-## 1. Executive Summary
+My ThreatLens is a local cybersecurity-intelligence workspace. Users create accounts, save independent monitoring setups, scan approved public sources, review relevant threats, export results, and optionally send email alerts or use Ollama assistants.
 
-My ThreatLens is a local-first monitoring workspace for cybersecurity analysts. It turns a saved technology, keyword, source, and date-range scope into temporary, exportable findings.
+## Start on Windows
 
-## 2. Business Problem
+1. Install Python 3.11 or newer.
+2. Download or clone the `codex/local-edition` branch.
+3. Double-click `START_MY_THREATLENS.bat`.
+4. Open `http://127.0.0.1:8001` if the browser does not open automatically.
+5. Select **Create account**, then choose a unique username and strong password.
 
-Public vulnerability and threat information is fragmented across government, vendor, and news sources. Manual monitoring is slow, inconsistent, and difficult to hand off.
+The launcher creates `.venv`, installs the required packages, copies `.env.example` to `.env` when needed, and starts FastAPI on port 8001.
 
-## 3. What My ThreatLens Does
+## Local persistence
 
-The application normalizes approved-source items, recognizes product and attack aliases, extracts CVEs, calculates evidence-based severity and immediate relevance, then stores everything locally for review and export.
+SQLite stores users, password hashes, sessions, setups, search parameters, and setup-specific automatic-email settings in `data/my_threatlens.db`. Each account has an independent workspace. The local installation and the Render-hosted installation do not synchronize data.
 
-## 4. Key Capabilities
+Back up the database only while My ThreatLens is stopped. The `.env` file and database are excluded from Git.
 
-- Named setup creation, loading, saving, duplication, search, and deletion
-- A shared demonstration login with browser-isolated workspaces
-- XLSX and DOCX setup preview/import
-- Non-blocking scans with progress and failure-safe behavior
-- Alias-aware technology-and-keyword matching
-- Server-side filters and pagination
-- A hosted open model through Ollama for both a site-wide workspace assistant and grounded per-finding conversations
-- Filter-consistent Excel export
-- Zoho Mail API or SMTP delivery with findings shown directly in the email
+## Ollama: two supported modes
 
-## 5. How It Works
+Local Ollama requires no API key:
 
-Collectors feed a normalization and enrichment pipeline. A finding is retained only when it matches at least one selected technology and one selected keyword. Deterministic relevance is available without an AI server.
+```env
+OLLAMA_URL=http://127.0.0.1:11434
+OLLAMA_MODEL=gpt-oss:20b
+OLLAMA_API_KEY=
+```
 
-## 6. Privacy and Security
+Install Ollama separately and pull the configured model before using AI features. For Ollama Cloud/API:
 
-The site uses one shared demonstration login. Its session cookie expires when the browser closes, so credentials are requested again when it is reopened. A separate persistent workspace identifier and browser backup preserve that browser's setups. Changes made on one laptop do not affect another browser or computer. The shared password is stored as a salted PBKDF2-SHA256 hash, and opaque login sessions are stored only as hashes. Findings, scans, reviews, and chat messages are not placed in browser storage and remain temporary. SMTP and AI credentials remain in server environment settings and are never sent to the browser.
+```env
+OLLAMA_URL=https://ollama.com
+OLLAMA_MODEL=gpt-oss:20b
+OLLAMA_API_KEY=
+```
 
-### Email setup
+Place the administrator's key after `OLLAMA_API_KEY=`. The rest of the application continues to work if Ollama is not configured.
 
-For hosted delivery, configure `ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET`, `ZOHO_REFRESH_TOKEN`, and `ZOHO_FROM_EMAIL`; the application uses Zoho Mail's HTTPS API so it also works on hosts that block SMTP. Local or paid deployments can instead set `SMTP_HOST`, `SMTP_PORT`, `SMTP_FROM_EMAIL`, and any required SMTP credentials. Restart after changing these values.
+## Email configuration
 
-## 7. How to Run
+All provider fields ship empty. The administrator may configure Zoho Mail API or standard SMTP in `.env`. Automatic scans and emails run without an open browser, but only while the computer is powered on, connected to the internet, and `START_MY_THREATLENS.bat` is running.
 
-On Windows, double-click `START_MY_THREATLENS.bat`. Or use PowerShell:
+The scheduler performs the configured daily 9:00 a.m. Beirut scan and the 30-minute Critical-threat checks. Each setup owns its recipients and automation settings.
+
+## Manual start
 
 ```powershell
 py -3.11 -m venv .venv
@@ -47,28 +53,10 @@ Copy-Item .env.example .env
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8001
 ```
 
-Set `SHARED_PASSWORD` in `.env`, open http://127.0.0.1:8001, and log in as `cyber expert` with that password. Each browser can create multiple independent monitoring setups.
+## Tests
 
-## 8. Typical Analyst Workflow
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+```
 
-Choose scope, save the setup, scan, filter findings, open a review, verify vendor evidence, email one or several selected threats, and export the current filtered set.
-
-### Ollama assistants
-
-The dashboard and About page include a site-wide assistant. Each finding also has an independent, finding-specific conversation. For local Ollama, set `OLLAMA_URL=http://127.0.0.1:11434` and install the configured model. For a hosted site that must work from any laptop on Ollama's free plan, set `OLLAMA_URL=https://ollama.com`, `OLLAMA_MODEL=gpt-oss:20b`, and store `OLLAMA_API_KEY` only in the hosting provider's secret environment variables. The API key is never sent to the browser.
-
-## 9. AI Disclosure
-
-AI-assisted content may be incomplete or incorrect. Verify recommendations against the cited vendor advisory, CVE record, and your own environment before taking action. This app is still under testing and can be enhanced more.
-
-## 10. Testing
-
-Run `.\.venv\Scripts\python.exe -m pytest -q`. See `TEST_REPORT.md` for the last verified result.
-
-## 11. Known Limitations
-
-The shipped collector is deterministic and offline. Live public-source adapters, DNS revalidation for custom URLs, and Ollama integration are documented extension points rather than enabled network behavior.
-
-## 12. Roadmap
-
-Add individually tested official API/feed adapters, cached live-source fallback, PostgreSQL deployment validation, and optional grounded Ollama analysis.
+AI output and public-source matching are decision support, not proof that an asset is vulnerable or compromised. Validate findings against primary advisories and the actual asset inventory.

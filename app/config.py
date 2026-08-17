@@ -14,9 +14,7 @@ class Settings(BaseSettings):
     max_upload_bytes: int = 5 * 1024 * 1024
     live_collectors_enabled: bool = True
     secure_cookies: bool = False
-    public_base_url: str = "https://my-threatlens-demo.onrender.com"
-    shared_username: str = "cyber expert"
-    shared_password: str = ""
+    public_base_url: str = "http://127.0.0.1:8001"
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_username: str = ""

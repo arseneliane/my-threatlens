@@ -60,17 +60,16 @@ def test_home_active_name(client):
     assert 'id="siteChatLauncher"' in about.text and '/static/site-chat.js' in about.text
     assert "/?open=setups" in about.text and "/?open=import" in about.text
     assert "How to use the website" in about.text and "Define your scope" in about.text
-    assert "AI-assisted summaries" in about.text and "independent workspace" in about.text
+    assert "AI-assisted summaries" in about.text and "Independent workspace" in about.text
     assert "Why My ThreatLens?" in about.text and "Traditional vulnerability-management platforms" in about.text
     assert "What production hosting enables" in about.text and "managed PostgreSQL" in about.text
     assert "tenable" not in about.text.lower()
-    assert "does not collect user email addresses" in about.text and "one-way hash" in about.text
+    assert "No email address is required" in about.text and "one-way hashes" in about.text
     assert 'href="/static/My-ThreatLens-Presentation.pptx"' in about.text
     assert "Download PowerPoint" in about.text
     assert client.get("/static/My-ThreatLens-Presentation.pptx").status_code==200
     assert client.get("/static/about.css").status_code==200
-    assert "Arsen Eliane" in about.text and "ChatGPT" in about.text and "internship project" in about.text
-    assert "Alfa" not in about.text and "Information Security Department" not in about.text
+    assert "Developed by" not in about.text and "internship project" not in about.text and "project-credits" not in about.text
     assert 'new URLSearchParams(location.search).get("open")' in js.text
     assert 'link.download=`My-ThreatLens-Results-${stamp}.xlsx`' in js.text
     assert "scopeDirty=true" in js.text and "showPendingScopeState()" in js.text
@@ -79,7 +78,7 @@ def test_home_active_name(client):
     assert "Your additions" in js.text and "function addCustomOption()" in js.text and "function removeCustomOption(value)" in js.text
     assert 'class="manual-option-chip"' in js.text and client.get("/static/selector-custom.css").status_code==200
 
-def test_shared_login_and_logout(client):
+def test_registration_login_and_logout(client):
     from fastapi.testclient import TestClient
     with TestClient(client.app) as visitor:
         denied=visitor.get("/",follow_redirects=False)
@@ -88,45 +87,48 @@ def test_shared_login_and_logout(client):
         assert visitor.get("/healthz").status_code==200
         login=visitor.get("/login")
         assert login.status_code==200 and "Every security headline" in login.text
-        assert all(name in login.text for name in ("Arsen Eliane","Miguel Jallad","Abdallah Asfour","Alberto Nahra","Ali Nasrallah"))
-        assert "With the guidance of" in login.text and visitor.get("/static/auth-credits.css").status_code==200
+        assert "project-credits" not in login.text and "Developed by" not in login.text
+        assert visitor.get("/static/auth-local.css").status_code==200
         assert 'src="/static/my-threatlens-shield.png"' in login.text
         assert visitor.get("/static/my-threatlens-shield.png").status_code==200
         assert "Login ends when the browser closes" in login.text
-        assert "Register" not in login.text
-        assert visitor.get("/register",follow_redirects=False).status_code==303
-        wrong=visitor.post("/login",data={"username":"cyber expert","password":"wrong"})
+        register_page=visitor.get("/register")
+        assert register_page.status_code==200 and "Create your account" in register_page.text
+        weak=visitor.post("/register",data={"username":"localuser","password":"weak","password_confirm":"weak"})
+        assert weak.status_code==422 and "at least 10 characters" in weak.text
+        created=visitor.post("/register",data={"username":"LocalUser","password":"StrongPass123","password_confirm":"StrongPass123"},follow_redirects=False)
+        assert created.status_code==303 and visitor.cookies.get("mythreatlens_session")
+        visitor.post("/logout",follow_redirects=False)
+        wrong=visitor.post("/login",data={"username":"localuser","password":"wrong"})
         assert wrong.status_code==401 and "incorrect" in wrong.text
-        correct=visitor.post("/login",data={"username":"CYBER EXPERT","password":"test-only-password"},follow_redirects=False)
+        correct=visitor.post("/login",data={"username":"LOCALUSER","password":"StrongPass123"},follow_redirects=False)
         assert correct.status_code==303 and visitor.cookies.get("mythreatlens_session")
         session_cookie=correct.headers["set-cookie"]
         assert "Max-Age" not in session_cookie and "Expires" not in session_cookie
         allowed=visitor.get("/")
-        assert allowed.status_code==200 and "cyber expert" in allowed.text and allowed.headers["x-frame-options"]=="DENY"
-        workspace_cookie=allowed.headers["set-cookie"]
-        assert "threatlens_client=" in workspace_cookie and "Max-Age=31536000" in workspace_cookie
+        assert allowed.status_code==200 and "LocalUser" in allowed.text and allowed.headers["x-frame-options"]=="DENY"
+        assert "threatlens_client" not in allowed.headers.get("set-cookie","")
         logged_out=visitor.post("/logout",follow_redirects=False)
         assert logged_out.status_code==303 and logged_out.headers["location"]=="/login"
         assert visitor.get("/",follow_redirects=False).status_code==303
 
-def test_browser_workspaces_are_isolated_and_locally_backed_up(client):
+def test_account_workspaces_are_isolated_and_database_backed(client):
     from fastapi.testclient import TestClient
     with TestClient(client.app) as second:
-        logged_in=second.post("/login",data={"username":"cyber expert","password":"test-only-password"},follow_redirects=False)
-        assert logged_in.status_code==303
+        created_user=second.post("/register",data={"username":"second_user","password":"SecondPass123","password_confirm":"SecondPass123"},follow_redirects=False)
+        assert created_user.status_code==303
         assert client.get("/").status_code==200 and second.get("/").status_code==200
         created=client.post("/api/setups",json={"name":"Laptop Only","technologies":["Windows 11"],"keywords":["CVE"],"sources":["CISA"],"date_range":"7d"})
         assert created.status_code==201
         assert "Laptop Only" in [setup["name"] for setup in client.get("/api/setups").json()]
         assert "Laptop Only" not in [setup["name"] for setup in second.get("/api/setups").json()]
         assert client.cookies.get("mythreatlens_session")!=second.cookies.get("mythreatlens_session")
-        workspace=client.get("/api/workspace").json()
-        restored=second.post("/api/workspace/restore",json={"setups":[{"name":"Recovered Setup","technologies":["Windows 11"],"keywords":["CVE"],"sources":["CISA"],"date_range":"7d"}],"active_name":"Recovered Setup"})
-        assert restored.status_code==200 and restored.json()["active"]["name"]=="Recovered Setup"
-        assert workspace["instance_id"]==restored.json()["instance_id"]
+        client.post("/logout",follow_redirects=False)
+        logged_back_in=client.post("/login",data={"username":client.test_username,"password":"Test-only-123"},follow_redirects=False)
+        assert logged_back_in.status_code==303
+        assert "Laptop Only" in [setup["name"] for setup in client.get("/api/setups").json()]
     js=client.get("/static/app.js").text
-    assert "localStorage.setItem(WORKSPACE_CACHE_KEY" in js and 'fetch("/api/workspace/restore"' in js
-    assert "my-threatlens-browser-workspace-v1" in js
+    assert "localStorage" not in js and "my-threatlens-browser-workspace-v1" not in js
 def test_custom_date_range_persists(client):
     data={"name":"Custom Dates","technologies":[],"keywords":[],"sources":[],"date_range":"custom","start_date":"2026-06-01","end_date":"2026-07-30"}
     created=client.post("/api/setups",json=data); assert created.status_code==201

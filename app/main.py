@@ -39,7 +39,6 @@ FINDING_IDS=itertools.count(1)
 SCAN_IDS=itertools.count(1)
 INSTANCE_ID=str(uuid.uuid4())
 SESSION_COOKIE="mythreatlens_session"
-WORKSPACE_COOKIE="threatlens_client"
 SESSION_DAYS=30
 ZERO_DAY_SCAN_KEYWORDS=["Zero-Day","Active Exploitation","CISA KEV","Proof of Concept"]
 AUTOMATIC_EMAIL_STATUS={"enabled":False,"last_daily_sent_at":None,"last_critical_sent_at":None,"last_error":None}
@@ -60,14 +59,13 @@ async def require_account(request:Request,call_next):
             if expires and expires.tzinfo is None: expires=expires.replace(tzinfo=timezone.utc)
             if session and expires>now:
                 user=db.get(User,session.user_id)
-                if user and user.username_normalized==normalize_username(settings.shared_username):
+                if user:
                     request.state.user={"id":user.id,"username":user.username}
-                    workspace_id=request.cookies.get(WORKSPACE_COOKIE) or uuid.uuid4().hex
-                    request.state.client_id=f"browser:{workspace_id}"
+                    request.state.client_id=f"user:{user.id}"
             elif session:
                 db.delete(session); db.commit()
             if request.state.user is None: invalid_token=True
-    public=request.url.path in {"/login","/healthz"} or request.url.path.startswith("/static/")
+    public=request.url.path in {"/login","/register","/healthz"} or request.url.path.startswith("/static/")
     if not public and request.state.user is None:
         if request.url.path.startswith("/api/"):
             response=JSONResponse(status_code=401,content={"detail":"Log in to continue."})
@@ -76,8 +74,6 @@ async def require_account(request:Request,call_next):
             response=RedirectResponse(f"/login?next={target}",status_code=303)
     else: response=await call_next(request)
     if invalid_token: response.delete_cookie(SESSION_COOKIE,path="/")
-    if request.state.user and not request.cookies.get(WORKSPACE_COOKIE):
-        response.set_cookie(WORKSPACE_COOKIE,request.state.client_id.removeprefix("browser:"),max_age=365*86400,httponly=True,secure=settings.secure_cookies or request.url.scheme=="https",samesite="strict",path="/")
     response.headers.setdefault("X-Content-Type-Options","nosniff")
     response.headers.setdefault("X-Frame-Options","DENY")
     response.headers.setdefault("Referrer-Policy","strict-origin-when-cross-origin")
@@ -115,7 +111,7 @@ def internal_setup_name(owner_id,display_name): return f"{owner_id}:{uuid.uuid4(
 def ensure_workspace(db,owner_id):
     rows=db.scalars(select(Setup).where(Setup.owner_id==owner_id).order_by(Setup.id)).all()
     if not rows:
-        # Preserve pre-upgrade local setups by assigning them to the first browser.
+        # Preserve pre-upgrade local setups by assigning them to the first account.
         rows=db.scalars(select(Setup).where(Setup.owner_id=="legacy").order_by(Setup.id)).all()
         if rows:
             for setup in rows:
@@ -309,8 +305,6 @@ async def run_automatic_critical_scans():
 
 @app.on_event("startup")
 async def startup():
-    if not settings.shared_password:
-        raise RuntimeError("SHARED_PASSWORD must be configured before My ThreatLens can start.")
     if settings.database_url.startswith("sqlite"):
         with engine.begin() as conn:
             if "setups" in inspect(conn).get_table_names():
@@ -320,14 +314,6 @@ async def startup():
                 conn.exec_driver_sql("UPDATE setups SET display_name=name WHERE display_name IS NULL OR display_name='' ")
                 conn.exec_driver_sql("UPDATE setups SET owner_id='legacy' WHERE owner_id IS NULL OR owner_id='' ")
     Base.metadata.create_all(engine)
-    with SessionLocal() as db:
-        normalized=normalize_username(settings.shared_username)
-        shared_user=db.scalar(select(User).where(User.username_normalized==normalized))
-        if not shared_user:
-            shared_user=User(username=settings.shared_username,username_normalized=normalized,password_hash=hash_password(settings.shared_password)); db.add(shared_user)
-        elif not verify_password(settings.shared_password,shared_user.password_hash):
-            shared_user.username=settings.shared_username; shared_user.password_hash=hash_password(settings.shared_password)
-        db.commit()
     if settings.database_url.startswith("sqlite"):
         with engine.begin() as conn:
             columns={column["name"] for column in inspect(conn).get_columns("email_automations")}
@@ -371,7 +357,6 @@ def create_user_session(db,user):
 
 def set_session_cookie(response,request,token):
     # No Max-Age/Expires: authentication ends when the browser session closes.
-    # The separate workspace cookie remains persistent so saved setups survive.
     response.set_cookie(SESSION_COOKIE,token,httponly=True,secure=settings.secure_cookies or request.url.scheme=="https",samesite="strict",path="/")
 
 @app.get("/login",response_class=HTMLResponse,include_in_schema=False)
@@ -388,8 +373,25 @@ def login(request:Request,username:str=Form(...),password:str=Form(...),next:str
     token=create_user_session(db,user)
     response=RedirectResponse(safe_next(next),status_code=303); set_session_cookie(response,request,token); return response
 
-@app.get("/register",include_in_schema=False)
-def register_page(): return RedirectResponse("/login",status_code=303)
+@app.get("/register",response_class=HTMLResponse,include_in_schema=False)
+def register_page(request:Request):
+    if request.state.user: return RedirectResponse("/",status_code=303)
+    return auth_template(request,"register")
+
+@app.post("/register",response_class=HTMLResponse,include_in_schema=False)
+def register(request:Request,username:str=Form(...),password:str=Form(...),password_confirm:str=Form(...),db:Session=Depends(get_db)):
+    username=username.strip(); normalized=normalize_username(username)
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{2,31}",username):
+        return auth_template(request,"register","Use 3–32 letters, numbers, dots, underscores, or hyphens; begin with a letter or number.",username,status_code=422)
+    if len(password)<10 or not re.search(r"[a-z]",password) or not re.search(r"[A-Z]",password) or not re.search(r"\d",password):
+        return auth_template(request,"register","Use at least 10 characters with an uppercase letter, lowercase letter, and number.",username,status_code=422)
+    if password!=password_confirm:
+        return auth_template(request,"register","The passwords do not match.",username,status_code=422)
+    if db.scalar(select(User).where(User.username_normalized==normalized)):
+        return auth_template(request,"register","That username is already in use.",username,status_code=409)
+    user=User(username=username,username_normalized=normalized,password_hash=hash_password(password)); db.add(user); db.flush()
+    token=create_user_session(db,user)
+    response=RedirectResponse("/",status_code=303); set_session_cookie(response,request,token); return response
 
 @app.post("/logout",include_in_schema=False)
 def logout(request:Request,db:Session=Depends(get_db)):

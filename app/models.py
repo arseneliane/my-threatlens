@@ -25,7 +25,7 @@ class Setup(Base):
     __tablename__ = "setups"
     id: Mapped[int] = mapped_column(primary_key=True)
     # `name` is an internal globally unique key. `display_name` is scoped to a
-    # browser workspace and is the only name exposed through the API.
+    # user workspace and is the only name exposed through the API.
     name: Mapped[str] = mapped_column(String(220), unique=True)
     display_name: Mapped[str] = mapped_column(String(120), default="Default Setup", index=True)
     owner_id: Mapped[str] = mapped_column(String(64), default="legacy", index=True)
