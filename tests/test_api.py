@@ -62,6 +62,7 @@ def test_home_active_name(client):
     assert "How to use the website" in about.text and "Define your scope" in about.text
     assert "AI-assisted summaries" in about.text and "independent workspace" in about.text
     assert "Why My ThreatLens?" in about.text and "Traditional vulnerability-management platforms" in about.text
+    assert "What production hosting enables" in about.text and "managed PostgreSQL" in about.text
     assert "tenable" not in about.text.lower()
     assert "does not collect user email addresses" in about.text and "one-way hash" in about.text
     assert 'href="/static/My-ThreatLens-Presentation.pptx"' in about.text
