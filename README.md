@@ -6,7 +6,7 @@ My ThreatLens is a local cybersecurity-intelligence workspace. Users create acco
 
 1. Download or clone the `codex/local-edition` branch.
 2. Double-click `START_MY_THREATLENS.bat`.
-3. Enter the Zoho sending address and its app password when prompted.
+3. Enter the sender email address and its app password when prompted. Common providers are configured automatically; uncommon providers also require their SMTP server details.
 4. Open `http://127.0.0.1:8001` if the browser does not open automatically.
 5. Select **Create account**, then choose a unique username and strong password.
 
@@ -42,7 +42,7 @@ The first launcher prepares local DeepSeek automatically. To switch later withou
 
 ## Email configuration
 
-All provider fields ship empty. The administrator may configure Zoho Mail API or standard SMTP in `.env`. Automatic scans and emails run without an open browser, but only while the computer is powered on, connected to the internet, and `START_MY_THREATLENS.bat` is running.
+All provider fields ship empty. The administrator may configure any compatible SMTP provider in `.env`; the optional Zoho Mail API integration also remains available. Automatic scans and emails run without an open browser, but only while the computer is powered on, connected to the internet, and `START_MY_THREATLENS.bat` is running.
 
 The scheduler performs the configured daily 9:00 a.m. Beirut scan and the 30-minute Critical-threat checks. Each setup owns its recipients and automation settings.
 

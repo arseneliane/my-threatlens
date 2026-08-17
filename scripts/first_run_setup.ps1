@@ -26,7 +26,7 @@ function Set-EnvValue([string]$Text,[string]$Name,[string]$Value){
 
 Write-Host ""
 Write-Host "My ThreatLens first-run setup" -ForegroundColor Cyan
-Write-Host "This prepares Python, local DeepSeek through Ollama, and Zoho email." -ForegroundColor DarkGray
+Write-Host "This prepares Python, local DeepSeek through Ollama, and email delivery." -ForegroundColor DarkGray
 
 $python=Find-CommandPath "py" @()
 if(-not $python){$python=Find-CommandPath "python" @("%LOCALAPPDATA%\Programs\Python\Python312\python.exe")}
@@ -71,17 +71,32 @@ if($installed -notmatch [regex]::Escape($model)){
 
 if(-not (Test-Path -LiteralPath $envPath)){
     if(-not (Test-Path -LiteralPath $examplePath)){throw ".env.example is missing."}
-    do{$mailAddress=(Read-Host "Zoho sending email address").Trim()}until($mailAddress -match "^[^\s@]+@[^\s@]+\.[^\s@]+$")
-    $securePassword=Read-Host "Zoho app password" -AsSecureString
+    do{$mailAddress=(Read-Host "Email sender address").Trim()}until($mailAddress -match "^[^\s@]+@[^\s@]+\.[^\s@]+$")
+    $securePassword=Read-Host "Email app password" -AsSecureString
     $passwordPointer=[Runtime.InteropServices.Marshal]::SecureStringToBSTR($securePassword)
     try{$appPassword=[Runtime.InteropServices.Marshal]::PtrToStringBSTR($passwordPointer)}finally{[Runtime.InteropServices.Marshal]::ZeroFreeBSTR($passwordPointer)}
-    if([string]::IsNullOrWhiteSpace($appPassword)){throw "The Zoho app password cannot be empty."}
-    $smtpHost=if($mailAddress -match "@zohomail\.com$"){"smtp.zoho.com"}else{"smtp.zoho.com"}
+    if([string]::IsNullOrWhiteSpace($appPassword)){throw "The email app password cannot be empty."}
+    $domain=($mailAddress.Split('@')[-1]).ToLowerInvariant()
+    $smtpHost=""; $smtpPort="465"; $smtpUseTls="false"; $smtpUseSsl="true"
+    switch -Regex ($domain) {
+        '^(zoho\.(com|eu|in|com\.au)|zohomail\.com)$' {$smtpHost="smtp.zoho.com"; break}
+        '^(gmail\.com|googlemail\.com)$' {$smtpHost="smtp.gmail.com"; break}
+        '^(outlook\.com|hotmail\.com|live\.com|office365\.com)$' {$smtpHost="smtp.office365.com"; $smtpPort="587"; $smtpUseTls="true"; $smtpUseSsl="false"; break}
+        '^(yahoo\.|ymail\.com)' {$smtpHost="smtp.mail.yahoo.com"; break}
+        '^(icloud\.com|me\.com|mac\.com)$' {$smtpHost="smtp.mail.me.com"; $smtpPort="587"; $smtpUseTls="true"; $smtpUseSsl="false"; break}
+        default {
+            Write-Host "This email provider is not recognized automatically." -ForegroundColor Yellow
+            do{$smtpHost=(Read-Host "SMTP server (example: smtp.example.com)").Trim()}until(-not [string]::IsNullOrWhiteSpace($smtpHost))
+            $enteredPort=(Read-Host "SMTP port [465]").Trim(); if($enteredPort){$smtpPort=$enteredPort}
+            $security=(Read-Host "Security: SSL or TLS [SSL]").Trim().ToUpperInvariant()
+            if($security -eq "TLS"){$smtpUseTls="true"; $smtpUseSsl="false"}
+        }
+    }
     $configuration=Get-Content -Raw -LiteralPath $examplePath
     $values=[ordered]@{
-        "SMTP_HOST"=$smtpHost; "SMTP_PORT"="465"; "SMTP_USERNAME"=$mailAddress;
+        "SMTP_HOST"=$smtpHost; "SMTP_PORT"=$smtpPort; "SMTP_USERNAME"=$mailAddress;
         "SMTP_PASSWORD"=$appPassword; "SMTP_FROM_EMAIL"=$mailAddress;
-        "SMTP_USE_TLS"="false"; "SMTP_USE_SSL"="true";
+        "SMTP_USE_TLS"=$smtpUseTls; "SMTP_USE_SSL"=$smtpUseSsl;
         "OLLAMA_URL"="http://127.0.0.1:11434"; "OLLAMA_MODEL"=$model; "OLLAMA_API_KEY"=""
     }
     foreach($item in $values.GetEnumerator()){$configuration=Set-EnvValue $configuration $item.Key $item.Value}
