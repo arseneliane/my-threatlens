@@ -1,6 +1,7 @@
 param([string]$ProjectRoot=(Split-Path -Parent $PSScriptRoot))
 
 $ErrorActionPreference="Stop"
+$ProjectRoot=[IO.Path]::GetFullPath($ProjectRoot.Trim().Trim('"'))
 $envPath=Join-Path $ProjectRoot ".env"
 $examplePath=Join-Path $ProjectRoot ".env.example"
 

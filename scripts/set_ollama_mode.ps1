@@ -4,6 +4,7 @@ param(
 )
 
 $ErrorActionPreference="Stop"
+$ProjectRoot=[IO.Path]::GetFullPath($ProjectRoot.Trim().Trim('"'))
 $envPath=Join-Path $ProjectRoot ".env"
 if(-not (Test-Path -LiteralPath $envPath)){throw "Run START_MY_THREATLENS.bat once before changing Ollama mode."}
 

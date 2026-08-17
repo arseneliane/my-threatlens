@@ -1,7 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\first_run_setup.ps1" -ProjectRoot "%~dp0" || goto :error
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\first_run_setup.ps1" -ProjectRoot "%~dp0." || goto :error
 set "PYTHON_CMD="
 where py >nul 2>&1 && set "PYTHON_CMD=py -3"
 if not defined PYTHON_CMD where python >nul 2>&1 && set "PYTHON_CMD=python"
