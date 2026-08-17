@@ -49,7 +49,10 @@ if(-not $ollama){
     if(-not $ollama){throw "Ollama was installed but its executable could not be located. Restart Windows and run this file again."}
 }
 
-$ramBytes=(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory
+$ramBytes=0
+try{$ramBytes=(Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).TotalPhysicalMemory}catch{
+    Write-Host "RAM size could not be read; selecting the lightweight DeepSeek model." -ForegroundColor DarkGray
+}
 $model=if($ramBytes -ge 16GB){"deepseek-r1:7b"}else{"deepseek-r1:1.5b"}
 $apiReady=$false
 try{$null=Invoke-RestMethod "http://127.0.0.1:11434/api/tags" -TimeoutSec 2; $apiReady=$true}catch{}
