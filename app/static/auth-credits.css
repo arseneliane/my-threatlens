@@ -3,4 +3,6 @@
 .project-credits{margin:12px 0 0;color:#d8edf4;font-size:12px;line-height:1.65}
 .project-credits strong{color:#fff}
 .project-credits span{color:#a9cdd9}
+.login-shield{display:grid;place-items:center;width:76px;height:76px;margin:0 0 22px;padding:8px;border:1px solid #d8e6ed;border-radius:20px;background:linear-gradient(145deg,#f7fcfd,#e8f7f7);box-shadow:0 10px 25px #07598518}
+.login-shield img{display:block;width:60px;height:60px;object-fit:contain}
 @media(max-width:850px){.intro-footer{margin-top:25px}.project-credits{margin-top:0}}
