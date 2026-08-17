@@ -88,6 +88,8 @@ def test_shared_login_and_logout(client):
         assert visitor.get("/healthz").status_code==200
         login=visitor.get("/login")
         assert login.status_code==200 and "Every security headline" in login.text
+        assert all(name in login.text for name in ("Arsen Eliane","Miguel Jallad","Abdallah Asfour","Alberto Nahra","Ali Nasrallah"))
+        assert "With the guidance of" in login.text and visitor.get("/static/auth-credits.css").status_code==200
         assert "Login ends when the browser closes" in login.text
         assert "Register" not in login.text
         assert visitor.get("/register",follow_redirects=False).status_code==303
