@@ -69,6 +69,7 @@ def test_home_active_name(client):
     assert "Download PowerPoint" in about.text
     assert client.get("/static/My-ThreatLens-Presentation.pptx").status_code==200
     assert client.get("/static/about.css").status_code==200
+    assert "Initial concept and implementation: Arsen Eliane" in about.text
     assert "Developed by" not in about.text and "internship project" not in about.text and "project-credits" not in about.text
     assert 'new URLSearchParams(location.search).get("open")' in js.text
     assert 'link.download=`My-ThreatLens-Results-${stamp}.xlsx`' in js.text
