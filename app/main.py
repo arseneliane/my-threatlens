@@ -22,7 +22,7 @@ from .services.matching.aliases import TECH_ALIASES, KEYWORD_ALIASES
 from .services.enrichment.core import extract_cves, severity, relevance
 from .services.imports.service import preview, sample_xlsx, sample_docx
 from .services.exports.excel import create_workbook
-from .services.chat import answer, ollama_answer, ollama_site_answer
+from .services.chat import answer, ai_finding_answer, ai_site_answer, selected_ai_model, selected_ai_provider
 from .services.email import send_findings_email, EmailDeliveryError, EMAIL_PATTERN
 from .services.auth import hash_password, new_session_token, normalize_username, session_token_hash, verify_password
 
@@ -96,6 +96,13 @@ class EmailAutomationIn(BaseModel):
     critical_enabled:bool=True
     subject:str="My ThreatLens security alert"
     message:str="Kindly review the threats below and take the required action."
+class EmailProviderIn(BaseModel):
+    sender_email:str
+    app_password:str=""
+    smtp_host:str=""
+    smtp_port:int|None=None
+    security:str="auto"
+    clear_password:bool=False
 
 class WorkspaceRestore(BaseModel):
     setups:list[SetupIn]
@@ -587,6 +594,47 @@ def automation_setup(db,request,setup_id=None):
     if not setup: raise HTTPException(404,"Setup not found.")
     return setup
 
+def smtp_defaults(address):
+    domain=address.rsplit("@",1)[-1].lower()
+    if domain in {"gmail.com","googlemail.com"}: return "smtp.gmail.com",465,"ssl"
+    if domain in {"outlook.com","hotmail.com","live.com","office365.com"}: return "smtp.office365.com",587,"tls"
+    if domain in {"yahoo.com","ymail.com"} or domain.startswith("yahoo."): return "smtp.mail.yahoo.com",465,"ssl"
+    if domain in {"icloud.com","me.com","mac.com"}: return "smtp.mail.me.com",587,"tls"
+    if domain=="zohomail.com" or domain.startswith("zoho."): return "smtp.zoho.com",465,"ssl"
+    return "",587,"tls"
+
+def write_env_values(values):
+    env_path=ROOT.parent/".env"
+    text=env_path.read_text(encoding="utf-8") if env_path.exists() else ""
+    for name,value in values.items():
+        safe=str(value).replace("\\","\\\\").replace('"','\\"').replace("\r","").replace("\n","")
+        line=f'{name}="{safe}"'
+        pattern=rf"(?m)^{re.escape(name)}=.*$"
+        text=re.sub(pattern,lambda _:line,text) if re.search(pattern,text) else text.rstrip()+"\n"+line+"\n"
+    env_path.write_text(text,encoding="utf-8")
+
+@app.get("/api/email-provider")
+def get_email_provider():
+    sender=(settings.smtp_from_email or settings.smtp_username).strip()
+    return {"configured":bool(settings.smtp_host and sender and settings.smtp_password),"sender_email":sender,"smtp_host":settings.smtp_host,"smtp_port":settings.smtp_port,"security":"ssl" if settings.smtp_use_ssl else "tls" if settings.smtp_use_tls else "none","has_password":bool(settings.smtp_password)}
+
+@app.put("/api/email-provider")
+def save_email_provider(data:EmailProviderIn):
+    sender=data.sender_email.strip().lower()
+    if not EMAIL_PATTERN.fullmatch(sender): raise HTTPException(422,"Enter a valid sender email address.")
+    detected_host,detected_port,detected_security=smtp_defaults(sender)
+    host=(data.smtp_host.strip() or detected_host).lower()
+    if not host or not re.fullmatch(r"[a-z0-9.-]+",host): raise HTTPException(422,"Enter the SMTP server supplied by your email provider.")
+    security=data.security.lower() if data.security.lower() in {"ssl","tls","none"} else detected_security
+    port=data.smtp_port or detected_port
+    if not 1<=port<=65535: raise HTTPException(422,"Enter a valid SMTP port.")
+    password="" if data.clear_password else data.app_password or settings.smtp_password
+    if not password: raise HTTPException(422,"Enter the email app password.")
+    values={"SMTP_HOST":host,"SMTP_PORT":port,"SMTP_USERNAME":sender,"SMTP_PASSWORD":password,"SMTP_FROM_EMAIL":sender,"SMTP_USE_TLS":str(security=="tls").lower(),"SMTP_USE_SSL":str(security=="ssl").lower()}
+    write_env_values(values)
+    for name,value in {"smtp_host":host,"smtp_port":port,"smtp_username":sender,"smtp_password":password,"smtp_from_email":sender,"smtp_use_tls":security=="tls","smtp_use_ssl":security=="ssl"}.items(): setattr(settings,name,value)
+    return {"configured":True,"sender_email":sender,"smtp_host":host,"smtp_port":port,"security":security,"has_password":True,"message":"Email sender saved locally."}
+
 @app.get("/api/automatic-email")
 def get_automatic_email(request:Request,setup_id:int|None=None,db:Session=Depends(get_db)):
     setup=automation_setup(db,request,setup_id)
@@ -657,15 +705,15 @@ async def chat(fid:int,data:ChatIn,request:Request,db:Session=Depends(get_db)):
     if len(question)>2000: raise HTTPException(422,"The question must be 2,000 characters or fewer.")
     history=CHAT_CACHE.setdefault(fid,[])
     pending=ChatMessage(finding_id=fid,role="user",content=question,created_at=datetime.now(timezone.utc))
-    try: content=await ollama_answer(f,history+[pending],settings)
+    try: content=await ai_finding_answer(f,history+[pending],settings)
     except RuntimeError as exc: raise HTTPException(503,str(exc))
     reply=ChatMessage(finding_id=fid,role="assistant",content=content,created_at=datetime.now(timezone.utc)); history.extend([pending,reply])
-    return {"message":{"role":"assistant","content":content},"model":settings.ollama_model}
+    return {"message":{"role":"assistant","content":content},"model":selected_ai_model(settings),"provider":selected_ai_provider(settings)}
 @app.get("/api/findings/{fid}/chat")
 def chat_history(fid:int,request:Request,db:Session=Depends(get_db)):
     if not cached_finding(fid,db,request.state.client_id): raise HTTPException(404,"Finding not found.")
     messages=CHAT_CACHE.get(fid,[])
-    return {"messages":[{"role":m.role,"content":m.content,"created_at":m.created_at} for m in messages],"model":settings.ollama_model}
+    return {"messages":[{"role":m.role,"content":m.content,"created_at":m.created_at} for m in messages],"model":selected_ai_model(settings),"provider":selected_ai_provider(settings)}
 @app.delete("/api/findings/{fid}/chat")
 def clear_chat(fid:int,request:Request,db:Session=Depends(get_db)):
     if not cached_finding(fid,db,request.state.client_id): raise HTTPException(404,"Finding not found.")
@@ -681,16 +729,16 @@ async def site_chat(data:ChatIn,request:Request,db:Session=Depends(get_db)):
     cache_key=(request.state.client_id,setup.id)
     history=SITE_CHAT_CACHE.setdefault(cache_key,[])
     pending={"role":"user","content":question,"created_at":datetime.now(timezone.utc).isoformat()}
-    try: content=await ollama_site_answer(setup,rows,history+[pending],settings)
+    try: content=await ai_site_answer(setup,rows,history+[pending],settings)
     except RuntimeError as exc: raise HTTPException(503,str(exc))
     reply={"role":"assistant","content":content,"created_at":datetime.now(timezone.utc).isoformat()}
     history.extend([pending,reply])
     if len(history)>40: del history[:-40]
-    return {"message":reply,"model":settings.ollama_model,"context_findings":len(rows)}
+    return {"message":reply,"model":selected_ai_model(settings),"provider":selected_ai_provider(settings),"context_findings":len(rows)}
 @app.get("/api/site-chat")
 def site_chat_history(request:Request,db:Session=Depends(get_db)):
     setup=ensure_workspace(db,request.state.client_id)
-    return {"messages":SITE_CHAT_CACHE.get((request.state.client_id,setup.id),[]),"model":settings.ollama_model}
+    return {"messages":SITE_CHAT_CACHE.get((request.state.client_id,setup.id),[]),"model":selected_ai_model(settings),"provider":selected_ai_provider(settings)}
 @app.delete("/api/site-chat")
 def clear_site_chat(request:Request,db:Session=Depends(get_db)):
     setup=ensure_workspace(db,request.state.client_id)

@@ -143,7 +143,7 @@ def site_system_prompt(setup,findings):
             f"URL: {f.url} | Summary: {summary}"
         )
     finding_context="\n".join(rows) or "No findings are currently available for this setup and view."
-    return f"""You are the site-wide My ThreatLens AI assistant, powered by an open model through Ollama. Help the user understand and use the application and analyze the supplied workspace context.
+    return f"""You are the site-wide My ThreatLens AI assistant, using the administrator-selected AI provider. Help the user understand and use the application and analyze the supplied workspace context.
 
 SITE CAPABILITIES
 - Setups define technologies, security keywords, public intelligence sources, and a date range.
@@ -151,7 +151,7 @@ SITE CAPABILITIES
 - Findings can be filtered, reviewed, exported to Excel, or emailed as a concise brief.
 - Scan for Zero Days performs a focused published-intelligence scan and reports zero-day mentions, active exploitation, critical-priority matches, and sources checked. It does not scan devices for unknown vulnerabilities.
 - Opening Review provides finding details, a direct email action, and a separate finding-specific AI conversation.
-- Setup configuration is backed up in this browser. Findings, scans, reviews, and chats are temporary.
+- Setup configuration is stored in the signed-in account's local database. Findings, scans, reviews, and chats are temporary.
 
 SAFETY AND ACCURACY RULES
 - Answer the exact question directly and concisely.
@@ -201,3 +201,68 @@ async def ollama_site_answer(setup,findings,history,settings):
     content=clean_model_response(response.json().get("message",{}).get("content",""))
     if not content: raise RuntimeError("The AI model returned an empty response. Please retry.")
     return content
+
+def selected_ai_provider(settings):
+    """Resolve explicit provider settings while accepting older Ollama-only .env files."""
+    provider=(settings.ai_provider or "").strip().lower()
+    if provider: return provider
+    if settings.ollama_url and settings.ollama_model: return "ollama"
+    return ""
+
+def selected_ai_model(settings):
+    provider=selected_ai_provider(settings)
+    if provider=="openai": return settings.ai_model or settings.openai_model
+    if provider=="ollama": return settings.ai_model or settings.ollama_model
+    return ""
+
+async def openai_messages_answer(messages,settings):
+    api_key=(settings.ai_api_key or settings.openai_api_key).strip()
+    model=(settings.ai_model or settings.openai_model).strip()
+    base_url=(settings.ai_base_url or settings.openai_base_url).rstrip("/")
+    if not api_key or not model:
+        raise RuntimeError("OpenAI is not configured. Add OPENAI_API_KEY and OPENAI_MODEL to .env, then restart My ThreatLens.")
+    payload={"model":model,"input":messages,"temperature":0.2}
+    try:
+        async with httpx.AsyncClient(timeout=settings.ollama_timeout_seconds) as client:
+            response=await client.post(base_url+"/responses",json=payload,headers={"Authorization":f"Bearer {api_key}","Content-Type":"application/json"})
+            response.raise_for_status()
+    except httpx.ConnectError as exc:
+        raise RuntimeError("OpenAI could not be reached. Check the internet connection and OPENAI_BASE_URL.") from exc
+    except httpx.TimeoutException as exc:
+        raise RuntimeError("OpenAI took too long to respond. Please retry.") from exc
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code==401: message="OpenAI authentication failed. Check OPENAI_API_KEY."
+        elif exc.response.status_code==429: message="OpenAI rate limit or API credit limit was reached. Check API billing and retry."
+        else:
+            try: detail=exc.response.json().get("error",{}).get("message","")
+            except Exception: detail=""
+            message=f"OpenAI returned an error: {detail or exc.response.status_code}"
+        raise RuntimeError(message) from exc
+    data=response.json(); content=(data.get("output_text") or "").strip()
+    if not content:
+        parts=[]
+        for item in data.get("output",[]):
+            for block in item.get("content",[]):
+                if block.get("type")=="output_text": parts.append(block.get("text", ""))
+        content="\n".join(parts).strip()
+    content=clean_model_response(content)
+    if not content: raise RuntimeError("OpenAI returned an empty response. Please retry.")
+    return content
+
+async def ai_finding_answer(f,history,settings):
+    provider=selected_ai_provider(settings)
+    if provider=="ollama": return await ollama_answer(f,history,settings)
+    if provider=="openai":
+        messages=[{"role":"system","content":finding_system_prompt(f)}]
+        messages.extend({"role":m.role,"content":m.content} for m in history[-20:] if m.role in ("user","assistant"))
+        return await openai_messages_answer(messages,settings)
+    raise RuntimeError("AI is not configured. Choose AI_PROVIDER in .env, then restart My ThreatLens.")
+
+async def ai_site_answer(setup,findings,history,settings):
+    provider=selected_ai_provider(settings)
+    if provider=="ollama": return await ollama_site_answer(setup,findings,history,settings)
+    if provider=="openai":
+        messages=[{"role":"system","content":site_system_prompt(setup,findings)}]
+        messages.extend({"role":m["role"],"content":m["content"]} for m in history[-20:] if m.get("role") in ("user","assistant"))
+        return await openai_messages_answer(messages,settings)
+    raise RuntimeError("AI is not configured. Choose AI_PROVIDER in .env, then restart My ThreatLens.")

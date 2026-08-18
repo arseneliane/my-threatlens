@@ -34,8 +34,15 @@ class Settings(BaseSettings):
     automatic_email_minute: int = 0
     automatic_email_setup_name: str = ""
     critical_email_enabled: bool = True
-    ollama_url: str = "http://127.0.0.1:11434"
-    ollama_model: str = "gpt-oss:20b"
+    ai_provider: str = ""
+    ai_base_url: str = ""
+    ai_api_key: str = ""
+    ai_model: str = ""
+    openai_api_key: str = ""
+    openai_model: str = ""
+    openai_base_url: str = "https://api.openai.com/v1"
+    ollama_url: str = ""
+    ollama_model: str = ""
     ollama_api_key: str = ""
     ollama_timeout_seconds: int = 120
     model_config = SettingsConfigDict(env_file=ROOT / ".env", extra="ignore")

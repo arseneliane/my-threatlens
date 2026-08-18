@@ -152,7 +152,7 @@ def test_email_requires_valid_address_and_configuration(client,monkeypatch):
     from app.config import settings
     monkeypatch.setattr(settings,"smtp_password","")
     unconfigured=client.post("/api/email",json={"recipient":"analyst@example.com","subject":"Report","message":"Attached"})
-    assert unconfigured.status_code==503 and "SMTP_PASSWORD" in unconfigured.json()["detail"]
+    assert unconfigured.status_code==503 and "Email Settings" in unconfigured.json()["detail"]
 def test_automatic_critical_email_is_deduplicated(monkeypatch):
     import asyncio
     from types import SimpleNamespace
@@ -423,8 +423,8 @@ def test_custom_dates_hidden_by_default(client):
     sidebar_css=client.get("/static/sidebar.css").text
     assert ".pagination[hidden]" in sidebar_css
 def test_chat_grounded(client,monkeypatch):
-    async def fake_ollama(finding,history,settings): return "Grounded local-model response"
-    monkeypatch.setattr("app.main.ollama_answer",fake_ollama)
+    async def fake_ai(finding,history,settings): return "Grounded local-model response"
+    monkeypatch.setattr("app.main.ai_finding_answer",fake_ai)
     findings=client.get("/api/findings").json()["items"]
     if findings:
         a=client.post(f'/api/findings/{findings[0]["id"]}/chat',json={"question":"Are we affected?"}).json()
@@ -434,18 +434,29 @@ def test_chat_grounded(client,monkeypatch):
 
 def test_site_chat_uses_workspace_context(client,monkeypatch):
     captured={}
-    async def fake_site_ollama(setup,findings,history,settings):
-        captured.update(setup=setup.display_name,findings=len(findings),question=history[-1]["content"],model=settings.ollama_model)
+    async def fake_site_ai(setup,findings,history,settings):
+        captured.update(setup=setup.display_name,findings=len(findings),question=history[-1]["content"])
         return "Workspace-level Ollama response"
-    monkeypatch.setattr("app.main.ollama_site_answer",fake_site_ollama)
+    monkeypatch.setattr("app.main.ai_site_answer",fake_site_ai)
     response=client.post("/api/site-chat",json={"question":"What should I prioritize?"})
     assert response.status_code==200 and response.json()["message"]["content"]=="Workspace-level Ollama response"
     assert captured["setup"] and captured["question"]=="What should I prioritize?"
-    assert captured["model"]=="gpt-oss:20b"
     history=client.get("/api/site-chat").json()["messages"]
     assert [message["role"] for message in history]==["user","assistant"]
     assert client.delete("/api/site-chat").json()["deleted"] is True
     assert client.get("/api/site-chat").json()["messages"]==[]
+
+def test_email_provider_is_optional_and_secret_is_never_returned(client,monkeypatch):
+    from app.main import settings
+    monkeypatch.setattr(settings,"smtp_host",""); monkeypatch.setattr(settings,"smtp_username","")
+    monkeypatch.setattr(settings,"smtp_from_email",""); monkeypatch.setattr(settings,"smtp_password","")
+    written={}; monkeypatch.setattr("app.main.write_env_values",lambda values:written.update(values))
+    status=client.get("/api/email-provider")
+    assert status.status_code==200 and status.json()["configured"] is False
+    saved=client.put("/api/email-provider",json={"sender_email":"sender@gmail.com","app_password":"test-app-password"})
+    assert saved.status_code==200 and saved.json()["configured"] is True
+    assert "test-app-password" not in saved.text
+    assert written["SMTP_HOST"]=="smtp.gmail.com" and written["SMTP_PASSWORD"]=="test-app-password"
 
 def test_site_chat_rejects_empty_or_oversized_questions(client):
     assert client.post("/api/site-chat",json={"question":"   "}).status_code==422

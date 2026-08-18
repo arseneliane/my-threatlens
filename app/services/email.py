@@ -81,7 +81,7 @@ def send_findings_email(settings,recipient,subject,body,findings,setup):
         send_via_zoho(settings,recipient,subject,html); return
     if not settings.smtp_host or not settings.smtp_from_email:
         location="the Render environment settings" if settings.secure_cookies else "the .env file"
-        raise RuntimeError(f"Email is not configured. The site owner must connect Zoho Mail or add SMTP settings in {location}, then restart My ThreatLens. You can use Export in the meantime.")
+        raise RuntimeError(f"Email is not configured. Sign in and open Email Settings, or add SMTP settings in {location}. You can use Export in the meantime.")
     if settings.smtp_username and not settings.smtp_password:
         location="the Render environment settings" if settings.secure_cookies else "the .env file"
         raise RuntimeError(f"Email authentication is incomplete. Add the mail provider's app-specific password as SMTP_PASSWORD in {location}, then restart My ThreatLens.")

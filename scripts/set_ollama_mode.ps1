@@ -25,16 +25,17 @@ if($Mode -eq "api"){
     if([string]::IsNullOrWhiteSpace($apiKey)){throw "The API key cannot be empty."}
     $requestedModel=(Read-Host "Ollama API model [gpt-oss:20b]").Trim()
     if(-not $requestedModel){$requestedModel="gpt-oss:20b"}
-    $values=[ordered]@{"OLLAMA_URL"="https://ollama.com";"OLLAMA_MODEL"=$requestedModel;"OLLAMA_API_KEY"=$apiKey}
+    $values=[ordered]@{"AI_PROVIDER"="ollama";"OLLAMA_URL"="https://ollama.com";"OLLAMA_MODEL"=$requestedModel;"OLLAMA_API_KEY"=$apiKey}
 }else{
-    $ramBytes=(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory
+    $ramBytes=0
+    try{$ramBytes=(Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).TotalPhysicalMemory}catch{}
     $localModel=if($ramBytes -ge 16GB){"deepseek-r1:7b"}else{"deepseek-r1:1.5b"}
     $ollama=(Get-Command ollama -ErrorAction SilentlyContinue).Source
     if(-not $ollama){$ollama="$env:LOCALAPPDATA\Programs\Ollama\ollama.exe"}
-    if(-not (Test-Path -LiteralPath $ollama)){throw "Local Ollama is not installed. Run START_MY_THREATLENS.bat again to install it."}
+    if(-not (Test-Path -LiteralPath $ollama)){throw "Local Ollama is not installed. Install Ollama for Windows, then run this file again."}
     & $ollama pull $localModel
     if($LASTEXITCODE -ne 0){throw "The local DeepSeek model download did not complete."}
-    $values=[ordered]@{"OLLAMA_URL"="http://127.0.0.1:11434";"OLLAMA_MODEL"=$localModel;"OLLAMA_API_KEY"=""}
+    $values=[ordered]@{"AI_PROVIDER"="ollama";"OLLAMA_URL"="http://127.0.0.1:11434";"OLLAMA_MODEL"=$localModel;"OLLAMA_API_KEY"=""}
 }
 
 foreach($item in $values.GetEnumerator()){$configuration=Set-EnvValue $configuration $item.Key $item.Value}
