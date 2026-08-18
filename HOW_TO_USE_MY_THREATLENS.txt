@@ -1,0 +1,100 @@
+MY THREATLENS - LOCAL EDITION
+QUICK START AND CONFIGURATION GUIDE
+
+1. START THE APPLICATION
+
+- Extract the ZIP into a normal folder.
+- Double-click START_MY_THREATLENS.bat.
+- The first run installs Python if necessary, creates the private Python environment,
+  installs application dependencies, and creates a blank .env configuration file.
+- It does not ask for email credentials and does not install or select an AI provider.
+- Keep the terminal window open while using My ThreatLens.
+- Open http://127.0.0.1:8001 if the browser does not open automatically.
+
+2. CREATE AN ACCOUNT
+
+- Select Create account on the login page.
+- Choose a unique username and a strong password.
+- Accounts, password hashes, setups, and search parameters are stored locally in
+  data/my_threatlens.db. They are not synchronized with the Render website.
+
+3. CONFIGURE EMAIL (OPTIONAL)
+
+- Log in and open Menu > Email Settings.
+- Enter the sender email address and the provider's app password.
+- Gmail, Outlook/Hotmail, Yahoo, iCloud, and Zoho SMTP settings are detected.
+- For another provider, expand Advanced SMTP settings and enter the server, port,
+  and security method supplied by the email provider.
+- The password is saved only in the local .env file and is never displayed again.
+- Recipient lists and automatic-email schedules remain independent for each setup.
+
+4. CONFIGURE AI (OPTIONAL)
+
+AI is disabled when AI_PROVIDER is empty. The application and scanning features
+continue to work without AI. Stop My ThreatLens before editing .env, save the file,
+and restart START_MY_THREATLENS.bat afterward.
+
+Local Ollama example:
+
+  AI_PROVIDER=ollama
+  OLLAMA_URL=http://127.0.0.1:11434
+  OLLAMA_MODEL=deepseek-r1:1.5b
+  OLLAMA_API_KEY=
+
+Install Ollama separately and run "ollama pull deepseek-r1:1.5b" first. Any locally
+installed Ollama model can be used by changing OLLAMA_MODEL.
+
+Ollama Cloud example:
+
+  AI_PROVIDER=ollama
+  OLLAMA_URL=https://ollama.com
+  OLLAMA_MODEL=gpt-oss:20b
+  OLLAMA_API_KEY=YOUR_OLLAMA_KEY
+
+OpenAI API example:
+
+  AI_PROVIDER=openai
+  OPENAI_API_KEY=YOUR_OPENAI_API_KEY
+  OPENAI_MODEL=YOUR_AVAILABLE_OPENAI_MODEL
+  OPENAI_BASE_URL=https://api.openai.com/v1
+
+An OpenAI API account and API billing are separate from a ChatGPT subscription.
+Never commit or share the completed .env file.
+
+5. USE SETUPS AND SCANS
+
+- Each setup has its own technologies, keywords, sources, dates, recipients, and
+  automatic-email preferences.
+- Scan Now searches the selected public intelligence sources.
+- The Zero-Day and Exploitation Watch separates explicit zero-day reporting from
+  known vulnerabilities with active-exploitation or other priority signals.
+- Findings can be reviewed, emailed individually or in groups, and exported to Excel.
+
+6. AUTOMATIC SCANS AND EMAILS
+
+- The local computer must remain powered on, connected to the internet, and running
+  START_MY_THREATLENS.bat.
+- The browser may be closed, but the terminal/server must remain running.
+- Automatic scan and recipient settings are configured inside each setup.
+
+7. DATA AND BACKUPS
+
+- Database: data/my_threatlens.db
+- Private configuration and credentials: .env
+- Back up those two files only while My ThreatLens is stopped.
+- Neither file is included in the GitHub source ZIP.
+
+8. NETWORK ACCESS
+
+- 127.0.0.1:8001 is accessible only from the same computer.
+- Allowing other computers to connect requires changing the server host to 0.0.0.0,
+  permitting TCP port 8001 in Windows Firewall, and using the host computer's LAN IP.
+- Obtain company IT approval before exposing the service on a corporate network.
+
+9. STOP THE APPLICATION
+
+- Close the My ThreatLens terminal window, or press Ctrl+C inside it.
+- Automatic scans and emails stop when the server stops.
+
+AI output and public-source matching are decision support. Verify important findings
+against primary advisories and the organization's actual asset inventory.
