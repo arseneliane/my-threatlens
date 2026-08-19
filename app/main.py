@@ -1,6 +1,8 @@
-import asyncio, hashlib, itertools, math, re, secrets, smtplib, uuid
+import asyncio, hashlib, itertools, math, os, re, secrets, shutil, smtplib, subprocess, threading, time, uuid
+import httpx
 from datetime import date, datetime, timezone, timedelta
 from pathlib import Path
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -22,7 +24,7 @@ from .services.matching.aliases import TECH_ALIASES, KEYWORD_ALIASES
 from .services.enrichment.core import extract_cves, severity, relevance
 from .services.imports.service import preview, sample_xlsx, sample_docx
 from .services.exports.excel import create_workbook
-from .services.chat import answer, ai_finding_answer, ai_site_answer, selected_ai_model, selected_ai_provider
+from .services.chat import answer, ai_finding_answer, ai_site_answer, provider_messages_answer, selected_ai_model, selected_ai_provider
 from .services.email import send_findings_email, EmailDeliveryError, EMAIL_PATTERN
 from .services.auth import hash_password, new_session_token, normalize_username, session_token_hash, verify_password
 
@@ -44,6 +46,42 @@ ZERO_DAY_SCAN_KEYWORDS=["Zero-Day","Active Exploitation","CISA KEV","Proof of Co
 AUTOMATIC_EMAIL_STATUS={"enabled":False,"last_daily_sent_at":None,"last_critical_sent_at":None,"last_error":None}
 AUTOMATICALLY_ALERTED_FINGERPRINTS=set()
 AUTOMATION_SCHEDULER=None
+AI_INSTALL_STATUS={"state":"idle","engine":"","model":"","progress":0,"message":"","cancellable":False}
+LOCAL_AI_PROCESS=None
+AI_PROVIDERS={
+    "openai":{"label":"OpenAI","base_url":"https://api.openai.com/v1"},
+    "anthropic":{"label":"Anthropic Claude","base_url":"https://api.anthropic.com/v1"},
+    "gemini":{"label":"Google Gemini","base_url":"https://generativelanguage.googleapis.com/v1beta"},
+    "groq":{"label":"Groq","base_url":"https://api.groq.com/openai/v1"},
+    "mistral":{"label":"Mistral AI","base_url":"https://api.mistral.ai/v1"},
+    "openrouter":{"label":"OpenRouter","base_url":"https://openrouter.ai/api/v1"},
+    "ollama_cloud":{"label":"Ollama Cloud","base_url":"https://ollama.com"},
+    "custom":{"label":"Custom OpenAI-compatible","base_url":""},
+}
+LOCAL_ENGINES={
+    "ollama":{"label":"Ollama","note":"Easiest automatic setup and the widest curated model selection.","automatic":True,"base_url":"http://127.0.0.1:11434"},
+    "lmstudio":{"label":"LM Studio / llmster","note":"Official headless LM Studio engine with GGUF model management.","automatic":True,"base_url":"http://127.0.0.1:1234/v1"},
+    "llamacpp":{"label":"llama.cpp","note":"Lightweight native GGUF server installed through Windows Package Manager.","automatic":True,"base_url":"http://127.0.0.1:12345/v1"},
+    "custom_local":{"label":"Custom local server","note":"Connect LM Studio, LocalAI, Jan, GPT4All, or another OpenAI-compatible localhost server.","automatic":False,"base_url":"http://127.0.0.1:8080/v1"},
+}
+LOCAL_MODELS=[
+    {"engine":"ollama","id":"deepseek-r1:1.5b","label":"DeepSeek R1 1.5B","size":"1.1 GB","ram":"4 GB","purpose":"Fast reasoning","note":"Smallest reasoning option for lightweight laptops"},
+    {"engine":"ollama","id":"llama3.2:1b","label":"Llama 3.2 1B","size":"1.3 GB","ram":"4 GB","purpose":"Fast general","note":"Very compact general assistant"},
+    {"engine":"ollama","id":"llama3.2:3b","label":"Llama 3.2 3B","size":"2.0 GB","ram":"6 GB","purpose":"Balanced","note":"Recommended balance of speed and general quality"},
+    {"engine":"ollama","id":"qwen2.5:3b","label":"Qwen 2.5 3B","size":"2.0 GB","ram":"6 GB","purpose":"Technical","note":"Compact technical and multilingual assistant"},
+    {"engine":"ollama","id":"qwen2.5:7b","label":"Qwen 2.5 7B","size":"4.7 GB","ram":"10 GB","purpose":"Technical+","note":"Stronger technical answers on capable computers"},
+    {"engine":"ollama","id":"gemma3:1b","label":"Gemma 3 1B","size":"0.8 GB","ram":"4 GB","purpose":"Smallest","note":"Small download for basic assistance"},
+    {"engine":"ollama","id":"gemma3:4b","label":"Gemma 3 4B","size":"3.3 GB","ram":"8 GB","purpose":"General quality","note":"Good general-purpose local quality"},
+    {"engine":"ollama","id":"mistral:7b","label":"Mistral 7B","size":"4.4 GB","ram":"10 GB","purpose":"Detailed","note":"Detailed answers with higher memory use"},
+    {"engine":"ollama","id":"phi4-mini","label":"Phi-4 Mini","size":"2.5 GB","ram":"8 GB","purpose":"Reasoning","note":"Compact Microsoft reasoning model"},
+    {"engine":"ollama","id":"codellama:7b","label":"Code Llama 7B","size":"3.8 GB","ram":"10 GB","purpose":"Code","note":"Useful for technical and code-oriented questions"},
+    {"engine":"lmstudio","id":"ibm/granite-4-micro@q4_k_m","label":"Granite 4 Micro","size":"about 2.5 GB","ram":"8 GB","purpose":"Balanced","note":"Compact model available through the LM Studio catalog"},
+    {"engine":"lmstudio","id":"deepseek-r1-distill-qwen-1.5b@q4_k_m","label":"DeepSeek R1 Distill 1.5B","size":"about 1.1 GB","ram":"4 GB","purpose":"Fast reasoning","note":"LM Studio searches its catalog and downloads Q4_K_M"},
+    {"engine":"lmstudio","id":"qwen2.5-3b-instruct@q4_k_m","label":"Qwen 2.5 3B Instruct","size":"about 2.0 GB","ram":"6 GB","purpose":"Technical","note":"LM Studio catalog model in an efficient quantization"},
+    {"engine":"llamacpp","id":"ggml-org/gemma-3-1b-it-GGUF:Q4_K_M","label":"Gemma 3 1B GGUF","size":"about 0.8 GB","ram":"4 GB","purpose":"Smallest","note":"Official ggml-org GGUF repository"},
+    {"engine":"llamacpp","id":"bartowski/DeepSeek-R1-Distill-Qwen-1.5B-GGUF:Q4_K_M","label":"DeepSeek R1 Distill 1.5B GGUF","size":"about 1.1 GB","ram":"4 GB","purpose":"Fast reasoning","note":"Downloads directly from Hugging Face"},
+    {"engine":"llamacpp","id":"bartowski/Qwen2.5-3B-Instruct-GGUF:Q4_K_M","label":"Qwen 2.5 3B GGUF","size":"about 2.0 GB","ram":"6 GB","purpose":"Technical","note":"Efficient Q4_K_M technical model"},
+]
 
 @app.middleware("http")
 async def require_account(request:Request,call_next):
@@ -103,6 +141,15 @@ class EmailProviderIn(BaseModel):
     smtp_port:int|None=None
     security:str="auto"
     clear_password:bool=False
+class AIProviderIn(BaseModel):
+    provider:str
+    model:str
+    api_key:str=""
+    base_url:str=""
+class LocalAIIn(BaseModel):
+    engine:str="ollama"
+    model:str
+    base_url:str=""
 
 class WorkspaceRestore(BaseModel):
     setups:list[SetupIn]
@@ -183,10 +230,10 @@ def scoped_findings(db,setup,params):
     technologies=set(setup.technologies); keywords=set(setup.keywords)
     requested_keyword=params.get("keyword"); requested_cve=(params.get("cve") or "").upper()
     rows=sorted(FINDINGS_CACHE.get(setup.id,[]),key=lambda f:utc_publication_date(f.publication_date),reverse=True)
-    all_technologies_selected=set(TECH_ALIASES).issubset(technologies)
+    general_selected="Other / General" in technologies
     all_keywords_selected=set(KEYWORD_ALIASES).issubset(keywords)
     matching=[f for f in rows
-            if (all_technologies_selected or technologies.intersection(f.matched_technologies or []))
+            if ((general_selected and not (f.matched_technologies or [])) or technologies.intersection(f.matched_technologies or []))
             and (all_keywords_selected or keywords.intersection(f.matched_keywords or []))
             and f.source in setup.sources and publication_in_setup_range(f.publication_date,setup)
             and (not params.get("severity") or f.severity==params["severity"])
@@ -338,12 +385,16 @@ async def startup():
     AUTOMATION_SCHEDULER.add_job(run_daily_email_report,CronTrigger(hour=settings.automatic_email_hour,minute=settings.automatic_email_minute,timezone=zone),id="daily-email",replace_existing=True,coalesce=True,max_instances=1,misfire_grace_time=86400)
     AUTOMATION_SCHEDULER.add_job(run_automatic_critical_scans,IntervalTrigger(seconds=settings.scan_interval_seconds),id="critical-scan",replace_existing=True,coalesce=True,max_instances=1,misfire_grace_time=None)
     AUTOMATION_SCHEDULER.start()
+    if settings.local_ai_engine in {"lmstudio","llamacpp"} and settings.local_ai_model_source:
+        threading.Thread(target=resume_local_engine,daemon=True).start()
 
 @app.on_event("shutdown")
 async def shutdown():
-    global AUTOMATION_SCHEDULER
+    global AUTOMATION_SCHEDULER,LOCAL_AI_PROCESS
     if AUTOMATION_SCHEDULER and AUTOMATION_SCHEDULER.running: AUTOMATION_SCHEDULER.shutdown(wait=False)
     AUTOMATION_SCHEDULER=None
+    if LOCAL_AI_PROCESS and LOCAL_AI_PROCESS.poll() is None: LOCAL_AI_PROCESS.terminate()
+    LOCAL_AI_PROCESS=None
 
 @app.exception_handler(Exception)
 async def errors(request, exc):
@@ -506,7 +557,7 @@ async def run_scan(scan_id):
     collected=await asyncio.gather(*(collect_safely(source) for source in sources))
     with SessionLocal() as db:
         setup=db.get(Setup,scan["setup_id"]); results=[]; added=0; added_in_range=0; scan_now=datetime.now(timezone.utc); live_sources=0; seen_fingerprints=set(); source_states=[]; zero_day_mentions=0; active_exploitation=0; critical_priority=0
-        all_technologies_selected=set(TECH_ALIASES).issubset(setup.technologies)
+        general_selected="Other / General" in setup.technologies
         all_keywords_selected=set(KEYWORD_ALIASES).issubset(setup.keywords)
         for finding in result_cache.get(setup.id,[]): CHAT_CACHE.pop(finding.id,None)
         for idx,(source,(raw_items,collector_mode)) in enumerate(zip(sources,collected)):
@@ -516,7 +567,7 @@ async def run_scan(scan_id):
             for raw in raw_items:
                 text=raw["title"]+" "+raw["summary"]; m=match_item(text,setup.technologies,ZERO_DAY_SCAN_KEYWORDS if zero_day_mode else setup.keywords)
                 if not zero_day_mode:
-                    m["relevant"]=(bool(m["technologies"]) or all_technologies_selected) and (bool(m["keywords"]) or all_keywords_selected)
+                    m["relevant"]=(bool(m["technologies"]) or general_selected) and (bool(m["keywords"]) or all_keywords_selected)
                 if not m["relevant"]: continue
                 cves=extract_cves(text); sev,basis=severity(cvss=raw.get("cvss"),vendor=raw.get("vendor_severity"),kev=raw.get("kev",False),text=text); score,conf,reason=relevance(m["technology_score"],m["keyword_score"],raw.get("cvss"),raw.get("kev",False),text)
                 fp=hashlib.sha256(f'{raw["url"]}|{raw["title"]}|{raw["publication_date"].date()}'.encode()).hexdigest()
@@ -613,6 +664,18 @@ def write_env_values(values):
         text=re.sub(pattern,lambda _:line,text) if re.search(pattern,text) else text.rstrip()+"\n"+line+"\n"
     env_path.write_text(text,encoding="utf-8")
 
+def local_api_url(value):
+    try:
+        parsed=urlsplit(value)
+        return parsed.scheme=="http" and parsed.hostname in {"127.0.0.1","localhost"} and parsed.username is None and parsed.password is None
+    except ValueError: return False
+
+def public_ai_provider():
+    provider=selected_ai_provider(settings)
+    if provider=="ollama": return "ollama_cloud" if settings.ollama_url.rstrip("/")=="https://ollama.com" else "ollama_local"
+    if provider=="local_openai": return settings.local_ai_engine or "custom_local"
+    return provider
+
 @app.get("/api/email-provider")
 def get_email_provider():
     sender=(settings.smtp_from_email or settings.smtp_username).strip()
@@ -634,6 +697,256 @@ def save_email_provider(data:EmailProviderIn):
     write_env_values(values)
     for name,value in {"smtp_host":host,"smtp_port":port,"smtp_username":sender,"smtp_password":password,"smtp_from_email":sender,"smtp_use_tls":security=="tls","smtp_use_ssl":security=="ssl"}.items(): setattr(settings,name,value)
     return {"configured":True,"sender_email":sender,"smtp_host":host,"smtp_port":port,"security":security,"has_password":True,"message":"Email sender saved locally."}
+
+@app.get("/api/ai-settings")
+async def get_ai_settings():
+    installed={"ollama":[],"lmstudio":[],"llamacpp":[],"custom_local":[]}; running={key:False for key in installed}
+    async with httpx.AsyncClient(timeout=2) as client:
+        for engine,url in (("ollama","http://127.0.0.1:11434/api/tags"),("lmstudio","http://127.0.0.1:1234/v1/models"),("llamacpp","http://127.0.0.1:12345/v1/models")):
+            try:
+                response=await client.get(url)
+                if response.is_success:
+                    running[engine]=True
+                    rows=response.json().get("models",[]) if engine=="ollama" else response.json().get("data",[])
+                    installed[engine]=[row.get("name","") if engine=="ollama" else row.get("id","") for row in rows]
+            except (httpx.HTTPError,ValueError): pass
+    public_provider=public_ai_provider()
+    flat_installed=list(dict.fromkeys(name for rows in installed.values() for name in rows if name))
+    return {"provider":public_provider,"local_engine":settings.local_ai_engine,"model":selected_ai_model(settings),"model_source":settings.local_ai_model_source,"base_url":settings.ai_base_url or settings.ollama_url,"has_api_key":bool(settings.ai_api_key or settings.openai_api_key or settings.ollama_api_key),"providers":AI_PROVIDERS,"local_engines":LOCAL_ENGINES,"local_models":LOCAL_MODELS,"installed_models":flat_installed,"installed_by_engine":installed,"engine_running":running,"ollama_running":running["ollama"],"install":dict(AI_INSTALL_STATUS)}
+
+async def test_ai_candidate(provider,model,key,base_url):
+    old={name:getattr(settings,name) for name in ("ai_provider","ai_model","ai_api_key","ai_base_url","ollama_url","ollama_model","ollama_api_key")}
+    try:
+        if provider=="ollama_cloud":
+            settings.ai_provider="ollama"; settings.ollama_url="https://ollama.com"; settings.ollama_model=model; settings.ollama_api_key=key
+        else:
+            settings.ai_provider=provider; settings.ai_model=model; settings.ai_api_key=key; settings.ai_base_url=base_url
+        return await provider_messages_answer([{"role":"user","content":"Reply with exactly: connection successful"}],settings) if provider!="ollama_cloud" else await provider_messages_answer([],settings)
+    finally:
+        for name,value in old.items(): setattr(settings,name,value)
+
+@app.post("/api/ai-settings/test")
+async def test_ai_settings(data:AIProviderIn):
+    provider=data.provider.strip().lower(); model=data.model.strip()
+    if provider not in AI_PROVIDERS: raise HTTPException(422,"Choose a supported online AI provider.")
+    current=selected_ai_provider(settings); current_public="ollama_cloud" if current=="ollama" and settings.ollama_url.rstrip("/")=="https://ollama.com" else current
+    saved_key=(settings.ai_api_key or settings.openai_api_key or settings.ollama_api_key) if current_public==provider else ""
+    key=data.api_key.strip() or saved_key
+    if not model or not key: raise HTTPException(422,"Enter both a model name and API key.")
+    base=data.base_url.strip() if provider=="custom" else AI_PROVIDERS[provider]["base_url"]
+    if provider=="custom" and not (base.startswith("https://") or local_api_url(base)): raise HTTPException(422,"Custom API addresses must use HTTPS, localhost, or 127.0.0.1.")
+    try:
+        if provider=="ollama_cloud":
+            async with httpx.AsyncClient(timeout=settings.ollama_timeout_seconds) as client:
+                response=await client.post("https://ollama.com/api/chat",headers={"Authorization":f"Bearer {key}"},json={"model":model,"messages":[{"role":"user","content":"Reply with connection successful"}],"stream":False}); response.raise_for_status()
+        else: await test_ai_candidate(provider,model,key,base)
+    except (RuntimeError,httpx.HTTPError) as exc: raise HTTPException(422,str(exc) or "The provider rejected this configuration.")
+    return {"ok":True,"message":f"{AI_PROVIDERS[provider]['label']} connection successful."}
+
+@app.put("/api/ai-settings")
+async def save_ai_settings(data:AIProviderIn):
+    await test_ai_settings(data)
+    provider=data.provider.strip().lower(); model=data.model.strip(); base=data.base_url.strip() if provider=="custom" else AI_PROVIDERS[provider]["base_url"]
+    current=selected_ai_provider(settings); current_public="ollama_cloud" if current=="ollama" and settings.ollama_url.rstrip("/")=="https://ollama.com" else current
+    existing_key=(settings.ai_api_key or settings.openai_api_key or settings.ollama_api_key) if current_public==provider else ""
+    key=data.api_key.strip() or existing_key
+    if provider=="ollama_cloud":
+        values={"AI_PROVIDER":"ollama","AI_MODEL":"","AI_API_KEY":"","AI_BASE_URL":"","LOCAL_AI_ENGINE":"","LOCAL_AI_MODEL_SOURCE":"","OLLAMA_URL":"https://ollama.com","OLLAMA_MODEL":model,"OLLAMA_API_KEY":key}
+        settings.ai_provider="ollama"; settings.ollama_url="https://ollama.com"; settings.ollama_model=model; settings.ollama_api_key=key
+    else:
+        values={"AI_PROVIDER":provider,"AI_MODEL":model,"AI_API_KEY":key,"AI_BASE_URL":base,"LOCAL_AI_ENGINE":"","LOCAL_AI_MODEL_SOURCE":""}
+        settings.ai_provider=provider; settings.ai_model=model; settings.ai_api_key=key; settings.ai_base_url=base
+    settings.local_ai_engine=""; settings.local_ai_model_source=""
+    write_env_values(values)
+    return {"saved":True,"provider":provider,"model":model,"message":f"{AI_PROVIDERS[provider]['label']} · {model} is now active."}
+
+@app.delete("/api/ai-settings")
+def disable_ai():
+    write_env_values({"AI_PROVIDER":"","AI_MODEL":"","AI_API_KEY":"","AI_BASE_URL":"","LOCAL_AI_ENGINE":"","LOCAL_AI_MODEL_SOURCE":"","OLLAMA_URL":"","OLLAMA_MODEL":"","OLLAMA_API_KEY":""})
+    for name in ("ai_provider","ai_model","ai_api_key","ai_base_url","ollama_url","ollama_model","ollama_api_key"): setattr(settings,name,"")
+    settings.local_ai_engine=""; settings.local_ai_model_source=""
+    return {"disabled":True,"message":"AI helper disabled. All other features remain available."}
+
+def executable(*candidates):
+    for candidate in candidates:
+        found=shutil.which(candidate)
+        if found: return found
+        path=Path(candidate)
+        if path.exists(): return str(path)
+    return ""
+
+def run_local_command(command,timeout=3600):
+    global LOCAL_AI_PROCESS
+    AI_INSTALL_STATUS["cancellable"]=True
+    process=subprocess.Popen(command,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,errors="replace",creationflags=getattr(subprocess,"CREATE_NO_WINDOW",0))
+    LOCAL_AI_PROCESS=process
+    try:
+        output,_=process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        process.terminate(); output,_=process.communicate(timeout=10)
+        raise RuntimeError("The local AI operation timed out. Check the internet connection and available disk space.")
+    finally: AI_INSTALL_STATUS["cancellable"]=False
+    code=process.returncode
+    if LOCAL_AI_PROCESS is process: LOCAL_AI_PROCESS=None
+    if AI_INSTALL_STATUS["state"]=="cancelled": raise RuntimeError("Local AI operation cancelled.")
+    if code: raise RuntimeError((output or "The local AI command failed.")[-800:])
+    return output or ""
+
+def wait_for_local_server(url,timeout=300):
+    deadline=time.time()+timeout
+    while time.time()<deadline:
+        try:
+            response=httpx.get(url,timeout=3)
+            if response.is_success: return response.json()
+        except (httpx.HTTPError,ValueError): pass
+        time.sleep(2)
+    raise RuntimeError("The model downloaded, but its local AI server did not become ready.")
+
+def save_local_ai(engine,model,source,base_url):
+    values={"LOCAL_AI_ENGINE":engine,"LOCAL_AI_MODEL_SOURCE":source,"AI_API_KEY":"","OLLAMA_API_KEY":""}
+    if engine=="ollama":
+        values.update({"AI_PROVIDER":"ollama","OLLAMA_URL":base_url.replace("/v1","").rstrip("/"),"OLLAMA_MODEL":model,"AI_MODEL":"","AI_BASE_URL":""})
+        settings.ai_provider="ollama"; settings.ollama_url=values["OLLAMA_URL"]; settings.ollama_model=model; settings.ollama_api_key=""
+    else:
+        values.update({"AI_PROVIDER":"local_openai","AI_MODEL":model,"AI_BASE_URL":base_url.rstrip("/"),"OLLAMA_URL":"","OLLAMA_MODEL":""})
+        settings.ai_provider="local_openai"; settings.ai_model=model; settings.ai_base_url=base_url.rstrip("/"); settings.ai_api_key=""
+    settings.local_ai_engine=engine; settings.local_ai_model_source=source
+    write_env_values(values)
+
+def install_ollama(model):
+    local_app=Path(os.environ.get("LOCALAPPDATA",Path.home()/"AppData/Local"))
+    ollama=executable("ollama",local_app/"Programs/Ollama/ollama.exe")
+    if not ollama:
+        winget=executable("winget")
+        if not winget: raise RuntimeError("Windows Package Manager is required to install Ollama automatically.")
+        AI_INSTALL_STATUS.update(progress=10,message="Installing the Ollama engine; approve any Windows prompt")
+        run_local_command([winget,"install","--id","Ollama.Ollama","--exact","--silent","--accept-package-agreements","--accept-source-agreements"],900)
+        ollama=executable("ollama",local_app/"Programs/Ollama/ollama.exe")
+    if not ollama: raise RuntimeError("Ollama was installed but its command could not be found. Restart Windows and retry.")
+    try: httpx.get("http://127.0.0.1:11434/api/tags",timeout=2).raise_for_status()
+    except httpx.HTTPError:
+        subprocess.Popen([ollama,"serve"],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,creationflags=getattr(subprocess,"CREATE_NO_WINDOW",0)); time.sleep(3)
+    AI_INSTALL_STATUS.update(state="downloading",progress=30,message=f"Ollama is downloading {model}. The time depends on model size and internet speed.")
+    run_local_command([ollama,"pull",model])
+    wait_for_local_server("http://127.0.0.1:11434/api/tags",60)
+    save_local_ai("ollama",model,model,"http://127.0.0.1:11434")
+
+def find_lms():
+    home=Path.home()
+    return executable("lms",home/".lmstudio/bin/lms.exe",home/".lmstudio/bin/lms.cmd",home/".lmstudio/bin/lms")
+
+def install_lmstudio(model):
+    lms=find_lms()
+    if not lms:
+        powershell=executable("powershell")
+        if not powershell: raise RuntimeError("PowerShell is required for the official LM Studio headless installer.")
+        tools_dir=ROOT.parent/"data"/"tools"; tools_dir.mkdir(parents=True,exist_ok=True)
+        installer=tools_dir/"lmstudio-install.ps1"
+        AI_INSTALL_STATUS.update(progress=10,message="Downloading and running the official LM Studio llmster installer")
+        response=httpx.get("https://lmstudio.ai/install.ps1",timeout=60,follow_redirects=True); response.raise_for_status()
+        installer.write_bytes(response.content)
+        run_local_command([powershell,"-NoProfile","-ExecutionPolicy","Bypass","-File",str(installer)],900)
+        lms=find_lms()
+    if not lms: raise RuntimeError("LM Studio was installed but the lms command was not found. Restart My ThreatLens and retry.")
+    run_local_command([lms,"daemon","up"],120)
+    AI_INSTALL_STATUS.update(state="downloading",progress=30,message=f"LM Studio is downloading {model}. Keep My ThreatLens open.")
+    run_local_command([lms,"get",model,"--gguf"],3600)
+    AI_INSTALL_STATUS.update(progress=75,message="Loading the downloaded LM Studio model")
+    run_local_command([lms,"load",model,"--yes","--identifier","mythreatlens-active"],900)
+    try: run_local_command([lms,"server","start","--port","1234"],120)
+    except RuntimeError:
+        # The command reports a non-zero code when the requested server is already running.
+        pass
+    wait_for_local_server("http://127.0.0.1:1234/v1/models",180)
+    save_local_ai("lmstudio","mythreatlens-active",model,"http://127.0.0.1:1234/v1")
+
+def find_llama_server():
+    return executable("llama-server","llama-server.exe")
+
+def start_llamacpp(model):
+    global LOCAL_AI_PROCESS
+    server=find_llama_server()
+    if not server:
+        winget=executable("winget")
+        if not winget: raise RuntimeError("Windows Package Manager is required to install llama.cpp automatically.")
+        AI_INSTALL_STATUS.update(progress=10,message="Installing the official llama.cpp Windows package")
+        run_local_command([winget,"install","llama.cpp","--silent","--accept-package-agreements","--accept-source-agreements"],900)
+        server=find_llama_server()
+    if not server: raise RuntimeError("llama.cpp was installed but llama-server could not be found. Restart Windows and retry.")
+    AI_INSTALL_STATUS.update(state="downloading",progress=30,message=f"llama.cpp is downloading and loading {model} from Hugging Face")
+    LOCAL_AI_PROCESS=subprocess.Popen([server,"-hf",model,"--alias","mythreatlens-active","--host","127.0.0.1","--port","12345"],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,creationflags=getattr(subprocess,"CREATE_NO_WINDOW",0))
+    AI_INSTALL_STATUS["cancellable"]=True
+    wait_for_local_server("http://127.0.0.1:12345/v1/models",3600)
+    AI_INSTALL_STATUS["cancellable"]=False
+    save_local_ai("llamacpp","mythreatlens-active",model,"http://127.0.0.1:12345/v1")
+
+def install_local_model(engine,model,base_url=""):
+    AI_INSTALL_STATUS.update(state="installing",engine=engine,model=model,progress=5,message=f"Checking {LOCAL_ENGINES[engine]['label']}",cancellable=False)
+    try:
+        if engine=="ollama": install_ollama(model)
+        elif engine=="lmstudio": install_lmstudio(model)
+        elif engine=="llamacpp": start_llamacpp(model)
+        else: raise RuntimeError("Choose Connect for a custom local server; it is not installed by My ThreatLens.")
+        AI_INSTALL_STATUS.update(state="ready",progress=100,message=f"{LOCAL_ENGINES[engine]['label']} · {model} is installed, tested, and active",cancellable=False)
+    except Exception as exc:
+        if AI_INSTALL_STATUS["state"]!="cancelled": AI_INSTALL_STATUS.update(state="failed",progress=0,message=str(exc),cancellable=False)
+
+def resume_local_engine():
+    """Bring back a managed local server after My ThreatLens restarts."""
+    engine=settings.local_ai_engine; source=settings.local_ai_model_source
+    try:
+        if engine=="lmstudio":
+            lms=find_lms()
+            if not lms: return
+            run_local_command([lms,"daemon","up"],120)
+            try: run_local_command([lms,"load",source,"--yes","--identifier","mythreatlens-active"],900)
+            except RuntimeError: pass
+            try: run_local_command([lms,"server","start","--port","1234"],120)
+            except RuntimeError: pass
+        elif engine=="llamacpp": start_llamacpp(source)
+    except Exception as exc:
+        AI_INSTALL_STATUS.update(state="failed",engine=engine,model=source,progress=0,message=f"The saved local AI could not restart: {exc}",cancellable=False)
+
+@app.post("/api/ai-settings/local",status_code=202)
+def configure_local_ai(data:LocalAIIn,bg:BackgroundTasks):
+    engine=data.engine.strip().lower(); model=data.model.strip()
+    if engine not in LOCAL_ENGINES or engine=="custom_local": raise HTTPException(422,"Choose an automatically managed local AI engine.")
+    allowed={row["id"] for row in LOCAL_MODELS if row["engine"]==engine}
+    if model not in allowed and not re.fullmatch(r"[A-Za-z0-9._/-]+(?:(?:@|:)[A-Za-z0-9._-]+)?",model): raise HTTPException(422,"Enter a valid model name for this engine.")
+    if AI_INSTALL_STATUS["state"] in {"installing","downloading"}: raise HTTPException(409,"Another local model is already being prepared.")
+    row=next((item for item in LOCAL_MODELS if item["engine"]==engine and item["id"]==model),None)
+    if row:
+        match=re.search(r"([0-9.]+)\s*GB",row["size"])
+        if match and shutil.disk_usage(ROOT).free < (float(match.group(1))+2)*1024**3: raise HTTPException(422,f"At least {float(match.group(1))+2:.1f} GB of free disk space is required for this model and installation files.")
+    bg.add_task(install_local_model,engine,model,data.base_url.strip())
+    return {"started":True,"engine":engine,"model":model,"message":f"{LOCAL_ENGINES[engine]['label']} setup started."}
+
+@app.post("/api/ai-settings/local/connect")
+async def connect_custom_local(data:LocalAIIn):
+    model=data.model.strip(); base=data.base_url.strip().rstrip("/")
+    if not local_api_url(base): raise HTTPException(422,"A custom local server must use localhost or 127.0.0.1.")
+    if not model: raise HTTPException(422,"Enter the model identifier exposed by the local server.")
+    old={name:getattr(settings,name) for name in ("ai_provider","ai_model","ai_api_key","ai_base_url")}
+    try:
+        settings.ai_provider="local_openai"; settings.ai_model=model; settings.ai_api_key=""; settings.ai_base_url=base
+        await provider_messages_answer([{"role":"user","content":"Reply with exactly: connection successful"}],settings)
+    except (RuntimeError,httpx.HTTPError) as exc: raise HTTPException(422,str(exc))
+    finally:
+        for name,value in old.items(): setattr(settings,name,value)
+    save_local_ai("custom_local",model,model,base)
+    return {"saved":True,"message":f"Custom local AI · {model} is connected and active."}
+
+@app.delete("/api/ai-settings/local/install")
+def cancel_local_ai_install():
+    global LOCAL_AI_PROCESS
+    if LOCAL_AI_PROCESS and LOCAL_AI_PROCESS.poll() is None:
+        LOCAL_AI_PROCESS.terminate()
+        AI_INSTALL_STATUS.update(state="cancelled",progress=0,message="Local AI operation cancelled.",cancellable=False)
+        return {"cancelled":True,"message":"Local AI operation cancelled."}
+    raise HTTPException(409,"There is no cancellable local AI operation.")
+
+@app.get("/api/ai-settings/local/status")
+def local_ai_status(): return dict(AI_INSTALL_STATUS)
 
 @app.get("/api/automatic-email")
 def get_automatic_email(request:Request,setup_id:int|None=None,db:Session=Depends(get_db)):
@@ -708,12 +1021,12 @@ async def chat(fid:int,data:ChatIn,request:Request,db:Session=Depends(get_db)):
     try: content=await ai_finding_answer(f,history+[pending],settings)
     except RuntimeError as exc: raise HTTPException(503,str(exc))
     reply=ChatMessage(finding_id=fid,role="assistant",content=content,created_at=datetime.now(timezone.utc)); history.extend([pending,reply])
-    return {"message":{"role":"assistant","content":content},"model":selected_ai_model(settings),"provider":selected_ai_provider(settings)}
+    return {"message":{"role":"assistant","content":content},"model":selected_ai_model(settings),"provider":public_ai_provider()}
 @app.get("/api/findings/{fid}/chat")
 def chat_history(fid:int,request:Request,db:Session=Depends(get_db)):
     if not cached_finding(fid,db,request.state.client_id): raise HTTPException(404,"Finding not found.")
     messages=CHAT_CACHE.get(fid,[])
-    return {"messages":[{"role":m.role,"content":m.content,"created_at":m.created_at} for m in messages],"model":selected_ai_model(settings),"provider":selected_ai_provider(settings)}
+    return {"messages":[{"role":m.role,"content":m.content,"created_at":m.created_at} for m in messages],"model":selected_ai_model(settings),"provider":public_ai_provider()}
 @app.delete("/api/findings/{fid}/chat")
 def clear_chat(fid:int,request:Request,db:Session=Depends(get_db)):
     if not cached_finding(fid,db,request.state.client_id): raise HTTPException(404,"Finding not found.")
@@ -734,11 +1047,11 @@ async def site_chat(data:ChatIn,request:Request,db:Session=Depends(get_db)):
     reply={"role":"assistant","content":content,"created_at":datetime.now(timezone.utc).isoformat()}
     history.extend([pending,reply])
     if len(history)>40: del history[:-40]
-    return {"message":reply,"model":selected_ai_model(settings),"provider":selected_ai_provider(settings),"context_findings":len(rows)}
+    return {"message":reply,"model":selected_ai_model(settings),"provider":public_ai_provider(),"context_findings":len(rows)}
 @app.get("/api/site-chat")
 def site_chat_history(request:Request,db:Session=Depends(get_db)):
     setup=ensure_workspace(db,request.state.client_id)
-    return {"messages":SITE_CHAT_CACHE.get((request.state.client_id,setup.id),[]),"model":selected_ai_model(settings),"provider":selected_ai_provider(settings)}
+    return {"messages":SITE_CHAT_CACHE.get((request.state.client_id,setup.id),[]),"model":selected_ai_model(settings),"provider":public_ai_provider()}
 @app.delete("/api/site-chat")
 def clear_site_chat(request:Request,db:Session=Depends(get_db)):
     setup=ensure_workspace(db,request.state.client_id)

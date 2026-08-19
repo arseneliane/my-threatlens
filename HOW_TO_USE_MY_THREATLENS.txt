@@ -7,9 +7,13 @@ QUICK START AND CONFIGURATION GUIDE
 - Double-click START_MY_THREATLENS.bat.
 - The first run installs Python if necessary, creates the private Python environment,
   installs application dependencies, and creates a blank .env configuration file.
+- Python 3.11 through 3.14 is accepted. If Python is missing, too old, or outside
+  the verified range, the launcher installs the tested Python 3.12 runtime.
 - It does not ask for email credentials and does not install or select an AI provider.
 - Keep the terminal window open while using My ThreatLens.
 - Open http://127.0.0.1:8001 if the browser does not open automatically.
+- To use another port, stop My ThreatLens and change APP_PORT in .env to an unused
+  number from 1024 through 65535. Restart the BAT file; it updates all local URLs.
 
 2. CREATE AN ACCOUNT
 
@@ -30,36 +34,25 @@ QUICK START AND CONFIGURATION GUIDE
 
 4. CONFIGURE AI (OPTIONAL)
 
-AI is disabled when AI_PROVIDER is empty. The application and scanning features
-continue to work without AI. Stop My ThreatLens before editing .env, save the file,
-and restart START_MY_THREATLENS.bat afterward.
-
-Local Ollama example:
-
-  AI_PROVIDER=ollama
-  OLLAMA_URL=http://127.0.0.1:11434
-  OLLAMA_MODEL=deepseek-r1:1.5b
-  OLLAMA_API_KEY=
-
-Install Ollama separately and run "ollama pull deepseek-r1:1.5b" first. Any locally
-installed Ollama model can be used by changing OLLAMA_MODEL.
-
-Ollama Cloud example:
-
-  AI_PROVIDER=ollama
-  OLLAMA_URL=https://ollama.com
-  OLLAMA_MODEL=gpt-oss:20b
-  OLLAMA_API_KEY=YOUR_OLLAMA_KEY
-
-OpenAI API example:
-
-  AI_PROVIDER=openai
-  OPENAI_API_KEY=YOUR_OPENAI_API_KEY
-  OPENAI_MODEL=YOUR_AVAILABLE_OPENAI_MODEL
-  OPENAI_BASE_URL=https://api.openai.com/v1
-
-An OpenAI API account and API billing are separate from a ChatGPT subscription.
-Never commit or share the completed .env file.
+- Log in and open Menu > AI Settings. No manual .env editing is required.
+- For Local AI, choose Ollama, LM Studio/llmster, llama.cpp, or a custom
+  OpenAI-compatible server running on localhost.
+- Choose a recommended model card or enter an exact custom model identifier.
+  My ThreatLens checks disk space, installs the selected engine when permitted,
+  downloads the model, starts the local server, tests it, and only then makes it
+  active. Windows, antivirus, or company policy may require approval.
+- Ollama has the largest recommended catalog. LM Studio/llmster uses its official
+  catalog and CLI. llama.cpp downloads compatible GGUF models from Hugging Face.
+  Custom local mode supports LocalAI, Jan, GPT4All, and existing local servers.
+- The screen identifies the active engine/model, detected models, download state,
+  and whether the selected local server is reachable.
+- For Online/API AI, choose OpenAI, Anthropic Claude, Google Gemini, Groq,
+  Mistral AI, OpenRouter, Ollama Cloud, or a custom OpenAI-compatible provider.
+- Enter the exact model name and API key, select Test connection, then Save and
+  activate. A failed test does not replace the current working configuration.
+- Saved API keys are never displayed again or included in the ZIP.
+- Consumer chatbot subscriptions do not necessarily include API access or billing.
+- AI can be disabled at any time; scanning, email, and exports keep working.
 
 5. USE SETUPS AND SCANS
 

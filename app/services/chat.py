@@ -1,6 +1,7 @@
 import re
 
 import httpx
+from urllib.parse import urlsplit
 
 from .matching.aliases import TECH_ALIASES
 
@@ -211,7 +212,7 @@ def selected_ai_provider(settings):
 
 def selected_ai_model(settings):
     provider=selected_ai_provider(settings)
-    if provider=="openai": return settings.ai_model or settings.openai_model
+    if provider in {"openai","anthropic","gemini","groq","mistral","openrouter","custom","local_openai"}: return settings.ai_model or (settings.openai_model if provider=="openai" else "")
     if provider=="ollama": return settings.ai_model or settings.ollama_model
     return ""
 
@@ -249,20 +250,96 @@ async def openai_messages_answer(messages,settings):
     if not content: raise RuntimeError("OpenAI returned an empty response. Please retry.")
     return content
 
+PROVIDER_URLS={
+    "groq":"https://api.groq.com/openai/v1",
+    "mistral":"https://api.mistral.ai/v1",
+    "openrouter":"https://openrouter.ai/api/v1",
+}
+
+async def compatible_messages_answer(messages,settings,provider):
+    api_key=(settings.ai_api_key or "").strip(); model=(settings.ai_model or "").strip()
+    base_url=(settings.ai_base_url or PROVIDER_URLS.get(provider,"")).rstrip("/")
+    local=provider=="local_openai"
+    if (not local and not api_key) or not model or not base_url:
+        raise RuntimeError(f"{provider.title()} is not completely configured. Open AI Settings and test the connection.")
+    try: parsed=urlsplit(base_url)
+    except ValueError: parsed=None
+    if local and (not parsed or parsed.scheme!="http" or parsed.hostname not in {"127.0.0.1","localhost"} or parsed.username is not None or parsed.password is not None):
+        raise RuntimeError("Local AI servers must use a valid localhost or 127.0.0.1 address.")
+    headers={"Content-Type":"application/json"}
+    if api_key: headers["Authorization"]=f"Bearer {api_key}"
+    try:
+        async with httpx.AsyncClient(timeout=settings.ollama_timeout_seconds) as client:
+            response=await client.post(base_url+"/chat/completions",json={"model":model,"messages":messages,"temperature":0.2},headers=headers)
+            response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code==401: message=f"{provider.title()} authentication failed. Check the API key."
+        elif exc.response.status_code==429: message=f"{provider.title()} rate or credit limit was reached."
+        else:
+            try: detail=exc.response.json().get("error",{}); detail=detail.get("message",str(detail)) if isinstance(detail,dict) else str(detail)
+            except Exception: detail=""
+            message=f"{provider.title()} returned an error: {detail or exc.response.status_code}"
+        raise RuntimeError(message) from exc
+    except (httpx.ConnectError,httpx.TimeoutException) as exc:
+        raise RuntimeError(f"{provider.title()} could not be reached. Check the connection and API address.") from exc
+    try: content=response.json()["choices"][0]["message"]["content"]
+    except (KeyError,IndexError,TypeError,ValueError) as exc: raise RuntimeError(f"{provider.title()} returned an unreadable response.") from exc
+    content=clean_model_response(content if isinstance(content,str) else "")
+    if not content: raise RuntimeError(f"{provider.title()} returned an empty response.")
+    return content
+
+async def anthropic_messages_answer(messages,settings):
+    key=(settings.ai_api_key or "").strip(); model=(settings.ai_model or "").strip(); base=(settings.ai_base_url or "https://api.anthropic.com/v1").rstrip("/")
+    if not key or not model: raise RuntimeError("Anthropic is not completely configured. Open AI Settings and test the connection.")
+    system="\n\n".join(m["content"] for m in messages if m["role"]=="system")
+    conversation=[m for m in messages if m["role"] in ("user","assistant")]
+    try:
+        async with httpx.AsyncClient(timeout=settings.ollama_timeout_seconds) as client:
+            response=await client.post(base+"/messages",json={"model":model,"max_tokens":1200,"system":system,"messages":conversation},headers={"x-api-key":key,"anthropic-version":"2023-06-01","Content-Type":"application/json"}); response.raise_for_status()
+    except httpx.HTTPStatusError as exc: raise RuntimeError("Anthropic authentication, model access, or quota check failed.") from exc
+    except (httpx.ConnectError,httpx.TimeoutException) as exc: raise RuntimeError("Anthropic could not be reached.") from exc
+    content="\n".join(block.get("text","") for block in response.json().get("content",[]) if block.get("type")=="text").strip()
+    if not content: raise RuntimeError("Anthropic returned an empty response.")
+    return clean_model_response(content)
+
+async def gemini_messages_answer(messages,settings):
+    key=(settings.ai_api_key or "").strip(); model=(settings.ai_model or "").strip(); base=(settings.ai_base_url or "https://generativelanguage.googleapis.com/v1beta").rstrip("/")
+    if not key or not model: raise RuntimeError("Gemini is not completely configured. Open AI Settings and test the connection.")
+    system="\n\n".join(m["content"] for m in messages if m["role"]=="system")
+    contents=[{"role":"model" if m["role"]=="assistant" else "user","parts":[{"text":m["content"]}]} for m in messages if m["role"] in ("user","assistant")]
+    payload={"contents":contents,"systemInstruction":{"parts":[{"text":system}]},"generationConfig":{"temperature":0.2}}
+    try:
+        async with httpx.AsyncClient(timeout=settings.ollama_timeout_seconds) as client:
+            response=await client.post(f"{base}/models/{model}:generateContent",params={"key":key},json=payload); response.raise_for_status()
+    except httpx.HTTPStatusError as exc: raise RuntimeError("Gemini authentication, model access, or quota check failed.") from exc
+    except (httpx.ConnectError,httpx.TimeoutException) as exc: raise RuntimeError("Gemini could not be reached.") from exc
+    try: content="\n".join(part.get("text","") for part in response.json()["candidates"][0]["content"]["parts"]).strip()
+    except (KeyError,IndexError,TypeError,ValueError) as exc: raise RuntimeError("Gemini returned an unreadable response.") from exc
+    if not content: raise RuntimeError("Gemini returned an empty response.")
+    return clean_model_response(content)
+
+async def provider_messages_answer(messages,settings):
+    provider=selected_ai_provider(settings)
+    if provider=="openai": return await openai_messages_answer(messages,settings)
+    if provider=="anthropic": return await anthropic_messages_answer(messages,settings)
+    if provider=="gemini": return await gemini_messages_answer(messages,settings)
+    if provider in {"groq","mistral","openrouter","custom","local_openai"}: return await compatible_messages_answer(messages,settings,provider)
+    raise RuntimeError("The selected AI provider is not supported.")
+
 async def ai_finding_answer(f,history,settings):
     provider=selected_ai_provider(settings)
     if provider=="ollama": return await ollama_answer(f,history,settings)
-    if provider=="openai":
+    if provider in {"openai","anthropic","gemini","groq","mistral","openrouter","custom","local_openai"}:
         messages=[{"role":"system","content":finding_system_prompt(f)}]
         messages.extend({"role":m.role,"content":m.content} for m in history[-20:] if m.role in ("user","assistant"))
-        return await openai_messages_answer(messages,settings)
+        return await provider_messages_answer(messages,settings)
     raise RuntimeError("AI is not configured. Choose AI_PROVIDER in .env, then restart My ThreatLens.")
 
 async def ai_site_answer(setup,findings,history,settings):
     provider=selected_ai_provider(settings)
     if provider=="ollama": return await ollama_site_answer(setup,findings,history,settings)
-    if provider=="openai":
+    if provider in {"openai","anthropic","gemini","groq","mistral","openrouter","custom","local_openai"}:
         messages=[{"role":"system","content":site_system_prompt(setup,findings)}]
         messages.extend({"role":m["role"],"content":m["content"]} for m in history[-20:] if m.get("role") in ("user","assistant"))
-        return await openai_messages_answer(messages,settings)
+        return await provider_messages_answer(messages,settings)
     raise RuntimeError("AI is not configured. Choose AI_PROVIDER in .env, then restart My ThreatLens.")

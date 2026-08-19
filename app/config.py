@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     ai_base_url: str = ""
     ai_api_key: str = ""
     ai_model: str = ""
+    local_ai_engine: str = ""
+    local_ai_model_source: str = ""
     openai_api_key: str = ""
     openai_model: str = ""
     openai_base_url: str = "https://api.openai.com/v1"

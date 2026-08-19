@@ -387,9 +387,9 @@ def test_last_setup_cannot_be_deleted(client):
     assert response.status_code==409 and "last setup cannot be deleted" in response.json()["detail"]
 def test_launcher_replaces_only_older_threatlens_server():
     launcher=open("START_MY_THREATLENS.bat",encoding="utf-8").read()
-    assert "Get-NetTCPConnection -LocalPort 8001" in launcher
+    assert "Get-NetTCPConnection -LocalPort %APP_PORT%" in launcher
     assert "uvicorn.+app\\.main:app" in launcher
-    assert "Port 8001 is used by another application" in launcher
+    assert "Port %APP_PORT% is used by another application" in launcher
 def test_results_follow_active_setup_source_and_date_range(client):
     setups=client.get("/api/setups").json()
     target=setups[0]
@@ -461,6 +461,64 @@ def test_email_provider_is_optional_and_secret_is_never_returned(client,monkeypa
 def test_site_chat_rejects_empty_or_oversized_questions(client):
     assert client.post("/api/site-chat",json={"question":"   "}).status_code==422
     assert client.post("/api/site-chat",json={"question":"x"*2001}).status_code==422
+
+def test_ai_settings_catalog_never_returns_keys(client,monkeypatch):
+    from app.main import settings
+    monkeypatch.setattr(settings,"ai_api_key","top-secret-test-key")
+    response=client.get("/api/ai-settings")
+    assert response.status_code==200
+    payload=response.json()
+    assert {"openai","anthropic","gemini","groq","mistral","openrouter","ollama_cloud","custom"}.issubset(payload["providers"])
+    assert {"ollama","lmstudio","llamacpp","custom_local"}.issubset(payload["local_engines"])
+    assert len(payload["local_models"])>=16 and "top-secret-test-key" not in response.text
+
+def test_ai_settings_page_exposes_engine_and_model_ui(client):
+    page=client.get("/")
+    assert page.status_code==200
+    for marker in ("aiModeLocal","aiModeOnline","aiLocalEngine","aiLocalModelCards","aiInstalledModels","aiLocalCancel"):
+        assert f'id="{marker}"' in page.text
+    assert "Local Ollama model" not in page.text
+    stylesheet=client.get("/static/ai-settings.css")
+    assert stylesheet.status_code==200 and ".ai-model-card" in stylesheet.text
+
+def test_custom_local_ai_rejects_remote_addresses(client):
+    response=client.post("/api/ai-settings/local/connect",json={"engine":"custom_local","model":"local-model","base_url":"http://192.168.1.20:8080/v1"})
+    assert response.status_code==422 and "localhost" in response.json()["detail"]
+    lookalike=client.post("/api/ai-settings/local/connect",json={"engine":"custom_local","model":"local-model","base_url":"http://127.0.0.1.example.test:8080/v1"})
+    assert lookalike.status_code==422
+
+def test_custom_local_ai_tests_before_activation(client,monkeypatch):
+    import app.main as main
+    written={}
+    async def accepted(messages,settings): return "connection successful"
+    monkeypatch.setattr(main,"provider_messages_answer",accepted)
+    monkeypatch.setattr(main,"write_env_values",lambda values:written.update(values))
+    for name in ("ai_provider","ai_model","ai_api_key","ai_base_url","local_ai_engine","local_ai_model_source"):
+        monkeypatch.setattr(main.settings,name,getattr(main.settings,name))
+    response=client.post("/api/ai-settings/local/connect",json={"engine":"custom_local","model":"jan-model","base_url":"http://127.0.0.1:8080/v1"})
+    assert response.status_code==200 and response.json()["saved"] is True
+    assert written["AI_PROVIDER"]=="local_openai" and written["LOCAL_AI_ENGINE"]=="custom_local"
+    assert "API_KEY" not in response.text
+
+def test_local_model_request_validates_engine_and_name(client):
+    assert client.post("/api/ai-settings/local",json={"engine":"unknown","model":"model","base_url":""}).status_code==422
+    response=client.post("/api/ai-settings/local",json={"engine":"ollama","model":"bad model & command","base_url":""})
+    assert response.status_code==422
+
+def test_ai_settings_validate_before_saving(client,monkeypatch):
+    import app.main as main
+    for name in ("ai_provider","ai_model","ai_api_key","ai_base_url"):
+        monkeypatch.setattr(main.settings,name,getattr(main.settings,name))
+    async def accepted(data): return {"ok":True}
+    monkeypatch.setattr(main,"test_ai_settings",accepted)
+    monkeypatch.setattr(main,"write_env_values",lambda values:None)
+    response=client.put("/api/ai-settings",json={"provider":"groq","model":"available-model","api_key":"temporary-key","base_url":""})
+    assert response.status_code==200 and response.json()["provider"]=="groq"
+    assert "temporary-key" not in response.text
+
+def test_ai_settings_reject_unsafe_custom_url(client):
+    response=client.post("/api/ai-settings/test",json={"provider":"custom","model":"model","api_key":"key","base_url":"http://remote.example.test/v1"})
+    assert response.status_code==422 and "HTTPS" in response.json()["detail"]
 
 def test_chat_does_not_claim_unrelated_platform_is_affected():
     from app.services.chat import answer

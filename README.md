@@ -20,36 +20,17 @@ Back up the database only while My ThreatLens is stopped. The `.env` file and da
 
 ## Optional AI providers
 
-Local Ollama requires no API key:
+The in-app AI Settings screen supports local Ollama, LM Studio/llmster,
+llama.cpp, and custom localhost OpenAI-compatible servers, as well as online API
+providers. Managed local engines can install, download, test, and activate a
+selected model without manual `.env` editing.
 
-```env
-AI_PROVIDER=ollama
-OLLAMA_URL=http://127.0.0.1:11434
-OLLAMA_MODEL=deepseek-r1:1.5b
-OLLAMA_API_KEY=
-```
-
-Install Ollama separately and pull the configured model before using AI features. For Ollama Cloud/API:
-
-```env
-AI_PROVIDER=ollama
-OLLAMA_URL=https://ollama.com
-OLLAMA_MODEL=gpt-oss:20b
-OLLAMA_API_KEY=
-```
-
-Place the administrator's key after `OLLAMA_API_KEY=`. For OpenAI:
-
-```env
-AI_PROVIDER=openai
-OPENAI_API_KEY=
-OPENAI_MODEL=
-OPENAI_BASE_URL=https://api.openai.com/v1
-```
-
-OpenAI API billing is separate from ChatGPT subscriptions. The rest of the application continues to work when AI is not configured.
-
-Restart My ThreatLens after changing AI settings. Existing Ollama switcher scripts remain available for convenience, but the startup launcher never chooses a provider automatically.
+Local engines do not require an API key. Choose an engine and model card, review
+its approximate download/RAM requirements, and select **Install, download, test,
+and activate**. Online providers request their own API key and exact model name;
+API billing is separate from consumer chatbot subscriptions. A failed download
+or connection test does not replace the current working AI. The rest of the
+application continues to work when AI is disabled.
 
 ## Email configuration
 
